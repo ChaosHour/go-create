@@ -27,7 +27,7 @@ go-create -h
         User
 ```
 
-## Example:
+## Example - 1:
 ```GO
 Passwords created for testing with:
   pwgen -s -c -n 23 1
@@ -165,4 +165,56 @@ cat only-lisa.sql
  GRANT USAGE ON *.* TO `lisa`@`%`;
  GRANT SELECT, INSERT, UPDATE, DELETE ON `app_db`.* TO `lisa`@`%`;
  GRANT `app_write`@`%` TO `lisa`@`%`;
+```
+
+## Example - 2:
+```GO
+Create a new role called app_read2 with grants and db:
+
+go-create on  main via 🐹 v1.20.5 
+❯ go-create -s 10.8.0.15 -r app_read2 -g select -db app_db                          
+2023/06/25 15:22:50 [+] Connecting to database: root:root@tcp(10.8.0.15:3306)/mysql
+2023/06/25 15:22:50 [+] Created role: app_read2
+2023/06/25 15:22:50 [+] Granted privileges to role: app_read2
+
+
+Create new user lisa3 and add lisa3 to a default role of app_read2:
+
+go-create on  main via 🐹 v1.20.5 
+❯ go-create -s 10.8.0.15 -u lisa3 -p OxFF29szWNQ962hUa0Toez3 -r app_read2            
+2023/06/25 15:23:37 [+] Connecting to database: root:root@tcp(10.8.0.15:3306)/mysql
+2023/06/25 15:23:37 [!] Role app_read2 already exists
+2023/06/25 15:23:37 [+] Created user: lisa3
+2023/06/25 15:23:37 [+] Granted role to user: lisa3
+2023/06/25 15:23:37 [+] Set default role for user: lisa3
+
+
+
+Connect to MySQL 8 and show grants:
+
+go-create on  main via 🐹 v1.20.5 
+❯ mysql -u lisa3 -pOxFF29szWNQ962hUa0Toez3
+
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 216
+Server version: 8.0.32-24 Percona Server (GPL), Release 24, Revision e5c6e9d2
+
+Copyright (c) 2000, 2023, Oracle and/or its affiliates.
+
+Oracle is a registered trademark of Oracle Corporation and/or its
+affiliates. Other names may be trademarks of their respective
+owners.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+mysql> show grants;
++-------------------------------------------+
+| Grants for lisa3@%                        |
++-------------------------------------------+
+| GRANT USAGE ON *.* TO `lisa3`@`%`         |
+| GRANT SELECT ON `app_db`.* TO `lisa3`@`%` |
+| GRANT `app_read2`@`%` TO `lisa3`@`%`      |
++-------------------------------------------+
+3 rows in set (0.00 sec)
+
 ```
