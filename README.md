@@ -154,6 +154,7 @@ Bye
 ```
 
 ## Using go-pass to validate:
+- [go-pass](https://github.com/ChaosHour/go-pass)
 ```GO
 go-pass -s 10.8.0.15 -f show_users.sql -o lisa | sed -e 's/CREATE USER/CREATE USER IF NOT EXISTS/g' -e '/^-- Grants/d' | grep -v 'Dumping' > only-lisa.sql
 2023/06/25 10:59:42 [+] Connecting to database: root:root@tcp(10.8.0.15:3306)/mysql
