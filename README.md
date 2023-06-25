@@ -5,7 +5,7 @@
 This tool is used to create users, roles, and grants in MySQL.  
 
 ## !!!!WARNING!!!!
-This is only used currently for testing. Do not use in PROD or any evirement that you care about. 
+This is only used currently for testing. Do not use in PROD or any environment that you care about. 
 More testing and validation needs to happen before this is ready for PROD.
 
 
