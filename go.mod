@@ -1,4 +1,4 @@
-module github/ChaosHour/go-create
+module github.com/ChaosHour/go-create
 
 go 1.20
 
