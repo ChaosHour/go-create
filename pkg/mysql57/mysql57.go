@@ -1,5 +1,3 @@
-// Create functions for GRANTS for version MySQL 5.7.6 and above
-
 package mysql57
 
 import (
@@ -14,14 +12,14 @@ import (
 
 // Define flags
 var (
-	source   = flag.String("s", "", "Source Host")
+	//source   = flag.String("s", "", "Source Host")
 	username = flag.String("u", "", "User")
 	password = flag.String("p", "", "Password")
 	host     = flag.String("host", "", "Host to assign to the user (default: %)")
 	grants   = flag.String("g", "", "Comma-separated list of grants to create")
 	dbName   = flag.String("db", "", "Database name")
-	role     = flag.String("r", "", "Comma-separated list of roles to create")
-	help     = flag.Bool("h", false, "Print help")
+	//role     = flag.String("r", "", "Comma-separated list of roles to create")
+	//help     = flag.Bool("h", false, "Print help")
 )
 
 // define colors
@@ -39,7 +37,7 @@ var (
 )
 
 // create a function to create a role or roles
-func CreateRole(db *sql.DB, role string) {
+func createRole(db *sql.DB, role string) {
 	// check if the role already exists
 	exists, err := CheckUserExists(db, role)
 	if err != nil {
