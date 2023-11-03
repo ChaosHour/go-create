@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"strings"
@@ -26,9 +25,11 @@ var (
 
 // define colors
 var green = color.New(color.FgGreen).SprintFunc()
-var red = color.New(color.FgRed).SprintFunc()
+
+// var red = color.New(color.FgRed).SprintFunc()
 var yellow = color.New(color.FgYellow).SprintFunc()
-var blue = color.New(color.FgBlue).SprintFunc()
+
+//var blue = color.New(color.FgBlue).SprintFunc()
 
 // parse flags
 func init() {
@@ -43,7 +44,7 @@ var (
 
 // read the ~/.my.cnf file to get the database credentials
 func readMyCnf() {
-	file, err := ioutil.ReadFile(os.Getenv("HOME") + "/.my.cnf")
+	file, err := os.ReadFile(os.Getenv("HOME") + "/.my.cnf")
 	if err != nil {
 		log.Fatal(err)
 	}
