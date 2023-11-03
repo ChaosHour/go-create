@@ -8,6 +8,9 @@ import (
 	"os"
 	"strings"
 
+	_ "github/ChaosHour/go-create/pkg/mysql56"
+	_ "github/ChaosHour/go-create/pkg/mysql57"
+
 	"github.com/fatih/color"
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -17,6 +20,7 @@ var (
 	source   = flag.String("s", "", "Source Host")
 	username = flag.String("u", "", "User")
 	password = flag.String("p", "", "Password")
+	host     = flag.String("host", "", "Host to assign to the user (default: %)")
 	grants   = flag.String("g", "", "Comma-separated list of grants to create")
 	dbName   = flag.String("db", "", "Database name")
 	role     = flag.String("r", "", "Comma-separated list of roles to create")
@@ -85,152 +89,60 @@ func checkUserExists(db *sql.DB, username string) (bool, error) {
 	return count > 0, nil
 }
 
-// create a function to create a role or roles
-func createRole(db *sql.DB, role string) {
-	// check if the role already exists
-	exists, err := checkUserExists(db, role)
+// Check what version of MySQL is running on the source host
+func checkMySQLVersion(db *sql.DB) (string, error) {
+	var version string
+	err := db.QueryRow("SELECT VERSION()").Scan(&version)
 	if err != nil {
-		log.Fatal(err)
+		return "", err
 	}
-	if exists {
-		log.Println(yellow("[!]"), "Role", role, "already exists")
-	} else {
-		// create the role
-		_, err := db.Exec(fmt.Sprintf("CREATE ROLE `%s`", role))
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Println(green("[+]"), "Created role:", role)
-	}
+	return version, nil
 }
 
-// create a function to grant privileges to the role or roles
-func grantPrivileges(db *sql.DB, role string, dbName string, grants string) {
-	// grant privileges to the role
-	_, err := db.Exec(fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, role))
+// Check if the user has the required privileges to create users and grant privileges
+func checkPrivileges(db *sql.DB) (bool, error) {
+	var count int
+	err := db.QueryRow("SELECT count(*) FROM mysql.user WHERE User='root' AND (GRANT_PRIV='Y' AND SUPER_PRIV='Y')").Scan(&count)
 	if err != nil {
-		log.Fatal(err)
+		return false, err
 	}
-	log.Println(green("[+]"), "Granted privileges to role:", role)
-}
-
-// create a function to create a user or users
-func createUser(db *sql.DB, username string, password string) {
-	// check if the user already exists
-	exists, err := checkUserExists(db, username)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if exists {
-		log.Println(yellow("[!]"), "User", username, "already exists")
-	} else {
-		// create the user
-		_, err := db.Exec(fmt.Sprintf("CREATE USER `%s` IDENTIFIED BY '%s'", username, password))
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Println(green("[+]"), "Created user:", username)
-	}
-}
-
-// create a function to grant roles to the user or users
-func grantRoles(db *sql.DB, username string, role string) {
-	// grant privileges to the role
-	_, err := db.Exec(fmt.Sprintf("GRANT `%s` TO `%s`", role, username))
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println(green("[+]"), "Granted role to user:", username)
-}
-
-// create a function to grant privileges to the user or users
-func grantPrivilegesToUser(db *sql.DB, username string, dbName string, grants string) {
-	// grant privileges to the role
-	_, err := db.Exec(fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, username))
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println(green("[+]"), "Granted privileges to user:", username)
-}
-
-// function to add SET DEFAULT ROLE to the user
-func setDefaultRole(db *sql.DB, username string, role string) {
-	_, err := db.Exec(fmt.Sprintf("ALTER USER `%s` DEFAULT ROLE `%s`", username, role))
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println(green("[+]"), "Set default role for user:", username)
+	return count > 0, nil
 }
 
 // main function
 func main() {
-	// print help menu if no flags are provided or -h flag is set
-	if len(os.Args) == 1 || *help {
+	// Print help if no arguments are supplied
+	if len(os.Args) == 1 {
 		flag.Usage()
 		os.Exit(0)
 	}
 
-	// read the ~/.my.cnf file to get the database credentials
-	readMyCnf()
+	// Print help if -h flag is supplied
+	if *help {
+		flag.Usage()
+		os.Exit(0)
+	}
 
-	// connect to the source database
+	// Connect to the database
 	connectToDatabase()
 
-	// create roles
-	if *role != "" {
-		roles := strings.Split(*role, ",")
-		for _, r := range roles {
-			createRole(db, r)
-		}
+	// Depending on the version of MySQL running on the source host, import the correct package
+	version, err := checkMySQLVersion(db)
+	if err != nil {
+		log.Fatal(err)
 	}
-
-	// grant privileges to roles
-	if *role != "" && *dbName != "" && *grants != "" {
-		roles := strings.Split(*role, ",")
-		for _, r := range roles {
-			grantPrivileges(db, r, *dbName, *grants)
-		}
+	if strings.HasPrefix(version, "5.6") {
+		log.Println(green("[+]"), "MySQL version:", version)
+		log.Println(green("[+]"), "Using MySQL 5.6")
+		// import56()
+		// err := CreateUserAndGrantPrivileges(db, true)
+		// if err != nil {
+		// 	log.Fatal(err)
+		// }
 	}
-
-	// create users
-	if *username != "" && *password != "" {
-		users := strings.Split(*username, ",")
-		passwords := strings.Split(*password, ",")
-		for i, u := range users {
-			createUser(db, u, passwords[i])
-		}
+	if strings.HasPrefix(version, "5.7") {
+		log.Println(green("[+]"), "MySQL version:", version)
+		log.Println(green("[+]"), "Using MySQL 5.7")
+		// import57()
 	}
-
-	// grant roles to users
-	if *username != "" && *role != "" {
-		users := strings.Split(*username, ",")
-		roles := strings.Split(*role, ",")
-		for _, u := range users {
-			for _, r := range roles {
-				grantRoles(db, u, r)
-			}
-		}
-	}
-
-	// grant privileges to users
-	if *username != "" && *dbName != "" && *grants != "" {
-		users := strings.Split(*username, ",")
-		for _, u := range users {
-			grantPrivilegesToUser(db, u, *dbName, *grants)
-		}
-	}
-
-	// set default role for users
-	if *username != "" && *role != "" {
-		users := strings.Split(*username, ",")
-		roles := strings.Split(*role, ",")
-		for _, u := range users {
-			for _, r := range roles {
-				setDefaultRole(db, u, r)
-			}
-		}
-	}
-
-	// close the database connection
-	defer db.Close()
 }
