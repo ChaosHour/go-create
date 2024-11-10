@@ -29,8 +29,7 @@ var (
 
 // define colors
 var green = color.New(color.FgGreen).SprintFunc()
-
-// var red = color.New(color.FgRed).SprintFunc()
+var red = color.New(color.FgRed).SprintFunc()
 var yellow = color.New(color.FgYellow).SprintFunc()
 
 //var blue = color.New(color.FgBlue).SprintFunc()
@@ -133,6 +132,12 @@ func readMyCnf() {
 	}
 }
 
+func checkConnection(db *sql.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return db.PingContext(ctx)
+}
+
 func connectToDatabase() *DBManager {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s)/",
 		os.Getenv("MYSQL_USER"),
@@ -141,8 +146,15 @@ func connectToDatabase() *DBManager {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Fatalf("Failed to connect: %v", err)
+		log.Fatalf("%s Failed to connect: %v", red("✘"), err)
 	}
+
+	// Test the connection
+	if err := checkConnection(db); err != nil {
+		log.Fatalf("%s Failed to connect to %s: %v", red("✘"), *source, err)
+	}
+
+	fmt.Printf("%s Successfully connected to %s\n", green("✓"), *source)
 
 	// Set connection pool parameters
 	db.SetMaxOpenConns(25)
