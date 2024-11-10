@@ -1,10 +1,20 @@
 \u mysql
 
-show databases;
+-- Check database availability
+SHOW DATABASES;
 
-Select user,host from mysql.user where account_locked ='Y' and password_expired='Y' order by 1;
+-- Find locked and expired accounts
+SELECT user, host 
+FROM mysql.user 
+WHERE account_locked = 'Y' 
+  AND password_expired = 'Y' 
+ORDER BY user;
 
-SELECT user AS role_name FROM mysql.user WHERE host = '%' AND NOT LENGTH(authentication_string);
+-- Identify roles without authentication
+SELECT user AS role_name 
+FROM mysql.user 
+WHERE host = '%' 
+  AND NOT LENGTH(authentication_string);
 
 SELECT DISTINCT User 'Role Name', if(from_user is NULL,0, 1) Active FROM mysql.user LEFT JOIN role_edges ON from_user=user WHERE account_locked='Y' AND password_expired='Y' AND authentication_string='';
 
