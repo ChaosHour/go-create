@@ -101,6 +101,19 @@ func (dm *DBManager) showUserGrants(username string) error {
 	return rows.Err()
 }
 
+// Add new method to check MySQL version
+func (dm *DBManager) getMySQLVersion() (int, error) {
+	var version string
+	err := dm.db.QueryRow("SELECT VERSION()").Scan(&version)
+	if err != nil {
+		return 0, err
+	}
+	if strings.HasPrefix(version, "5.7") {
+		return 57, nil
+	}
+	return 80, nil // Assume 8.0+ for anything else
+}
+
 // Initialize flags with validation
 func init() {
 	flag.Parse()
@@ -176,6 +189,16 @@ func (dm *DBManager) checkUserExists(username string) (bool, error) {
 
 // create a function to create a role or roles
 func (dm *DBManager) createRole(role string) error {
+	version, err := dm.getMySQLVersion()
+	if err != nil {
+		return fmt.Errorf("checking MySQL version: %w", err)
+	}
+
+	if version < 80 {
+		dm.logger.Printf("%s Roles are not supported in MySQL 5.7, skipping role creation for: %s", yellow("[!]"), role)
+		return nil
+	}
+
 	exists, err := dm.checkUserExists(role)
 	if err != nil {
 		return fmt.Errorf("checking role existence: %w", err)
@@ -198,8 +221,13 @@ func (dm *DBManager) createRole(role string) error {
 
 // create a function to grant privileges to the role or roles
 func (dm *DBManager) grantPrivileges(role string, dbName string, grants string) {
-	// grant privileges to the role
-	_, err := dm.db.Exec(fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, role))
+	var query string
+	if dbName == "*.*" {
+		query = fmt.Sprintf("GRANT %s ON *.* TO `%s`", grants, role)
+	} else {
+		query = fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, role)
+	}
+	_, err := dm.db.Exec(query)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -208,7 +236,6 @@ func (dm *DBManager) grantPrivileges(role string, dbName string, grants string) 
 
 // create a function to create a user or users
 func (dm *DBManager) createUser(username string, password string) {
-	// check if the user already exists
 	exists, err := dm.checkUserExists(username)
 	if err != nil {
 		log.Fatal(err)
@@ -216,10 +243,14 @@ func (dm *DBManager) createUser(username string, password string) {
 	if exists {
 		dm.logger.Printf("%s User %s already exists", yellow("[!]"), username)
 	} else {
-		// create the user
-		_, err := dm.db.Exec(fmt.Sprintf("CREATE USER `%s` IDENTIFIED BY '%s'", username, password))
+		// Try MySQL 5.7 syntax first
+		_, err := dm.db.Exec(fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED WITH mysql_native_password BY '%s'", username, password))
 		if err != nil {
-			log.Fatal(err)
+			// If 5.7 syntax fails, try MySQL 8.x syntax
+			_, err = dm.db.Exec(fmt.Sprintf("CREATE USER `%s` IDENTIFIED BY '%s'", username, password))
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
 		dm.logger.Printf("%s Created user: %s", green("[+]"), username)
 	}
@@ -227,8 +258,18 @@ func (dm *DBManager) createUser(username string, password string) {
 
 // create a function to grant roles to the user or users
 func (dm *DBManager) grantRoles(username string, role string) {
+	version, err := dm.getMySQLVersion()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if version < 80 {
+		dm.logger.Printf("%s Roles are not supported in MySQL 5.7, skipping role grant for user: %s", yellow("[!]"), username)
+		return
+	}
+
 	// grant privileges to the role
-	_, err := dm.db.Exec(fmt.Sprintf("GRANT `%s` TO `%s`", role, username))
+	_, err = dm.db.Exec(fmt.Sprintf("GRANT `%s` TO `%s`", role, username))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -237,8 +278,39 @@ func (dm *DBManager) grantRoles(username string, role string) {
 
 // create a function to grant privileges to the user or users
 func (dm *DBManager) grantPrivilegesToUser(username string, dbName string, grants string) {
-	// grant privileges to the role
-	_, err := dm.db.Exec(fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, username))
+	var query string
+	if dbName == "*.*" {
+		// Get existing global privileges
+		rows, err := dm.db.Query(fmt.Sprintf("SHOW GRANTS FOR '%s'@'%%'", username))
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer rows.Close()
+
+		var existingGrants string
+		for rows.Next() {
+			var grant string
+			if err := rows.Scan(&grant); err != nil {
+				log.Fatal(err)
+			}
+			if strings.Contains(grant, "ON *.*") {
+				existingGrants = strings.TrimSpace(strings.Split(strings.Split(grant, "GRANT")[1], "ON")[0])
+				break
+			}
+		}
+
+		// Combine existing and new privileges
+		allGrants := grants
+		if existingGrants != "" && existingGrants != "USAGE" {
+			allGrants = existingGrants + "," + grants
+		}
+
+		query = fmt.Sprintf("GRANT %s ON *.* TO `%s`@'%%'", allGrants, username)
+	} else {
+		query = fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, username)
+	}
+
+	_, err := dm.db.Exec(query)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -247,7 +319,17 @@ func (dm *DBManager) grantPrivilegesToUser(username string, dbName string, grant
 
 // function to add SET DEFAULT ROLE to the user
 func (dm *DBManager) setDefaultRole(username string, role string) {
-	_, err := dm.db.Exec(fmt.Sprintf("ALTER USER `%s` DEFAULT ROLE `%s`", username, role))
+	version, err := dm.getMySQLVersion()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if version < 80 {
+		dm.logger.Printf("%s Roles are not supported in MySQL 5.7, skipping default role for user: %s", yellow("[!]"), username)
+		return
+	}
+
+	_, err = dm.db.Exec(fmt.Sprintf("ALTER USER `%s` DEFAULT ROLE `%s`", username, role))
 	if err != nil {
 		log.Fatal(err)
 	}
