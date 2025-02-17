@@ -33,14 +33,20 @@ Credentials precedence:
 go-create -h
   -config string
         Path to configuration file
+  -create-user string
+        Username to create/modify
+  -create-pass string
+        Password for the user being created
   -db string
         Database name
   -g string
         Comma-separated list of grants to create
+  -gcp
+        Revoke cloudsqlsuperuser role after granting roles (for GCP Cloud SQL)
   -h    
         Print help
   -p string
-        Password for the database connection
+        Password for the admin connection
   -r string
         Comma-separated list of roles to create
   -s string
@@ -50,7 +56,7 @@ go-create -h
   -show-user string
         Show grants for the specified username
   -u string
-        Username for the database connection
+        Username for the admin connection
 ```
 
 ## Examples:
@@ -71,6 +77,100 @@ go-create -s 10.8.0.15 -r app_read2 -g select -db app_db
 ```GO
 # Show grants for user 'lisa'
 go-create -show-user lisa
+```
+
+### 4. Creating a user with role in Google Cloud SQL
+```GO
+# Create user 'repl' with role 'repl_role', specific database privileges, and revoke cloudsqlsuperuser
+# Note: -u and -p are for admin credentials, --create-user and --create-pass are for the new user
+go-create -s cloud-sql-instance -u root -p s3cr3t --create-user repl --create-pass replpass -g select,insert,update,delete -db app_db -r repl_role -gcp
+
+# The above command will:
+# 1. Connect as root to create the new user
+# 2. Create user 'repl' with password 'replpass'
+# 3. Create role 'repl_role'
+# 4. Grant the specified privileges to the role
+# 5. Grant the role to the user
+# 6. Revoke cloudsqlsuperuser role (due to -gcp flag)
+```
+
+Note: The -gcp flag specifically handles Google Cloud SQL instances where users are automatically granted the 'cloudsqlsuperuser' role. When this flag is used, the tool will automatically revoke this role after granting the specified roles.
+
+### 5. Creating a user with role in Google Cloud SQL
+```GO
+# Create user 'repl' with role 'repl_role', specific database privileges, and revoke cloudsqlsuperuser
+go-create -s cloud-sql-instance -u root -p s3cr3t --create-user repl --create-pass replpass -g select,insert,update,delete -db app_db -r repl_role -gcp
+
+# Output will include:
+# [+] Created user: repl@%
+# [+] Created role: repl_role
+# [+] Granted privileges to role: repl_role
+# [+] Granted role to user: repl
+# [+] Revoked cloudsqlsuperuser role from user: repl@%
+```
+
+Note: When using with Google Cloud SQL:
+- The `-u` and `-p` flags are for the admin credentials (to connect to the database)
+- The `--create-user` and `--create-pass` flags specify the new user to create
+- The `-gcp` flag ensures the cloudsqlsuperuser role is revoked after granting the specified roles
+
+### 6. Using credentials from .my.cnf
+```GO
+# Create role 'app_read' with SELECT privilege on chaos database
+# Note: No -u/-p/-s flags needed when using .my.cnf
+go-create -r app_read -g select -db chaos
+
+# Output will include:
+# [+] Using credentials from .my.cnf
+# [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
+# [+] Created role: app_read
+# [+] Granted privileges to role: app_read
+```
+
+### 7. Show role privileges
+```GO
+# Show privileges for role 'app_read'
+go-create -r app_read -show
+
+# Output:
+2025/02/17 10:33:55 [+] Using credentials from .my.cnf
+2025/02/17 10:33:55 [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
+2025/02/17 10:33:55 [+] Grants for role app_read:
+2025/02/17 10:33:55     GRANT USAGE ON *.* TO `app_read`@`%`
+2025/02/17 10:33:55     GRANT SELECT ON `chaos`.* TO `app_read`@`%`
+```
+
+### 8. Creating a user with password, role and privileges
+```GO
+# Create user 'lisa' with password, role 'app_write', and specific database privileges
+go-create --create-user lisa --create-pass OxFF29szWNQ962hUa0Toez3 -r app_write -g select,insert,update,delete -db chaos
+
+# Output:
+2025/02/17 10:36:46 [+] Using credentials from .my.cnf
+2025/02/17 10:36:46 [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
+2025/02/17 10:36:46 [+] Created role: app_write
+2025/02/17 10:36:46 [+] Granted privileges to role: app_write
+2025/02/17 10:36:46 [+] Created user: lisa@%
+2025/02/17 10:36:46 [+] Granted role to user: lisa
+2025/02/17 10:36:46 [+] Granted privileges to user: lisa
+2025/02/17 10:36:46 [+] Set default role for user: lisa
+
+# Verify role privileges:
+go-create -r app_write -show
+2025/02/17 10:37:23 [+] Using credentials from .my.cnf
+2025/02/17 10:37:23 [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
+2025/02/17 10:37:23 [+] Grants for role app_write:
+2025/02/17 10:37:23     GRANT USAGE ON *.* TO `app_write`@`%`
+2025/02/17 10:37:23     GRANT SELECT, INSERT, UPDATE, DELETE ON `chaos`.* TO `app_write`@`%`
+
+# Verify user grants:
+go-create -show-user lisa
+2025/02/17 10:38:10 [+] Using credentials from .my.cnf
+2025/02/17 10:38:10 [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
+2025/02/17 10:38:10 [+] Grants for user lisa:
+2025/02/17 10:38:10     GRANT USAGE ON *.* TO `lisa`@`%`
+2025/02/17 10:38:10     GRANT SELECT, INSERT, UPDATE, DELETE ON `chaos`.* TO `lisa`@`%`
+2025/02/17 10:38:10     GRANT `app_write`@`%` TO `lisa`@`%`
 ```
 
 ## Validation
