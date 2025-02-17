@@ -1,6 +1,5 @@
 # go-create
 
-
 ## Description:
 This tool is used to create users, roles, and grants in MySQL.  
 
@@ -8,41 +7,70 @@ This tool is used to create users, roles, and grants in MySQL.
 This is only used currently for testing. Do not use in PROD or any environment that you care about. 
 More testing and validation needs to happen before this is ready for PROD.
 
+## Configuration
+You can store your MySQL connection details in a configuration file. By default, the tool looks for `.go-create.json` in your home directory, or you can specify a different path using the `-config` flag.
+
+Example configuration file:
+```json
+{
+  "mysql": {
+    "host": "192.168.50.50",
+    "port": "3306",
+    "user": "root",
+    "password": "your_password"
+  }
+}
+```
+
+Credentials precedence:
+1. Command line flags (-u, -p, -s)
+2. Configuration file specified by -config
+3. Default .go-create.json in home directory
+4. ~/.my.cnf file
 
 ## Usage:
 ```GO
 go-create -h
+  -config string
+        Path to configuration file
   -db string
         Database name
   -g string
         Comma-separated list of grants to create
-  -h    Print help
+  -h    
+        Print help
   -p string
-        Password
+        Password for the database connection
   -r string
         Comma-separated list of roles to create
   -s string
-        Source Host
+        Source Host (MySQL server address)
+  -show
+        Show grants for specified role (requires -r flag)
+  -show-user string
+        Show grants for the specified username
   -u string
-        User
+        Username for the database connection
 ```
 
-## Example - 1:
+## Examples:
+
+### 1. Creating a user with role and privileges
 ```GO
-Passwords created for testing with:
-  pwgen -s -c -n 23 1
+# Create user 'lisa' with role 'app_write' and specific database privileges
+go-create -s 10.8.0.15 -u lisa -p OxFF29szWNQ962hUa0Toez3 -r app_write -g select,insert,update,delete -db app_db 
+```
 
-Database created for testing with:
-  mysqladmin create app_db  
+### 2. Creating a role with privileges
+```GO
+# Create role 'app_read2' with SELECT privilege on app_db
+go-create -s 10.8.0.15 -r app_read2 -g select -db app_db
+```
 
-❯ go-create -s 10.8.0.15 -u lisa -p OxFF29szWNQ962hUa0Toez3 -r app_write -g select,insert,update,delete -db app_db 
-2023/06/25 10:54:13 [+] Connecting to database: root:root@tcp(10.8.0.15:3306)/mysql
-2023/06/25 10:54:13 [!] Role app_write already exists
-2023/06/25 10:54:13 [+] Granted privileges to role: app_write
-2023/06/25 10:54:13 [+] Created user: lisa
-2023/06/25 10:54:13 [+] Granted role to user: lisa
-2023/06/25 10:54:13 [+] Granted privileges to user: lisa
-2023/06/25 10:54:13 [+] Set default role for user: lisa
+### 3. Showing user grants
+```GO
+# Show grants for user 'lisa'
+go-create -show-user lisa
 ```
 
 ## Validation
@@ -218,3 +246,14 @@ mysql> show grants;
 3 rows in set (0.00 sec)
 
 ```
+
+## Example - 3:
+```GO
+Show grants for an existing user:
+
+❯ go-create -show-user lisa
+2023/06/25 15:24:50 [+] Connecting to database: root:root@tcp(10.8.0.15:3306)/mysql
+2023/06/25 15:24:50 [+] Grants for user lisa:
+    GRANT USAGE ON *.* TO `lisa`@`%`
+    GRANT SELECT, INSERT, UPDATE, DELETE ON `app_db`.* TO `lisa`@`%`
+    GRANT `app_write`@`%` TO `lisa`@`%`
