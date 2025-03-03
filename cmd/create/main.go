@@ -10,26 +10,37 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ChaosHour/go-create/internal/config"
+	"github.com/ChaosHour/go-create/pkg/auth"
+	"github.com/ChaosHour/go-create/pkg/config"
+	"github.com/ChaosHour/go-create/pkg/database"
 	"github.com/fatih/color"
 	_ "github.com/go-sql-driver/mysql"
 )
 
 // Define flags
 var (
-	source         = flag.String("s", "", "Source Host to connect to")
-	username       = flag.String("u", "", "Username to connect with (from .my.cnf if not specified)")
-	password       = flag.String("p", "", "Password to connect with (from .my.cnf if not specified)")
-	createUser     = flag.String("create-user", "", "Username to create/modify")
-	createPassword = flag.String("create-pass", "", "Password for the user being created")
-	grants         = flag.String("g", "", "Comma-separated list of grants to create")
-	dbName         = flag.String("db", "", "Database name")
-	role           = flag.String("r", "", "Comma-separated list of roles to create")
-	help           = flag.Bool("h", false, "Print help")
-	showGrants     = flag.Bool("show", false, "Show grants for specified role")
-	showUserName   = flag.String("show-user", "", "Show grants for the specified username")
-	configFile     = flag.String("config", "", "Path to configuration file")
-	isGCP          = flag.Bool("gcp", false, "After granting roles to a user, automatically revoke the 'cloudsqlsuperuser' role (for GCP Cloud SQL)")
+	source             = flag.String("s", "", "Source Host to connect to")
+	username           = flag.String("u", "", "Username to connect with (from .my.cnf if not specified)")
+	password           = flag.String("p", "", "Password to connect with (from .my.cnf if not specified)")
+	createUser         = flag.String("create-user", "", "Username to create/modify")
+	createPassword     = flag.String("create-pass", "", "Password for the user being created (subject to password policy)")
+	grants             = flag.String("g", "", "Comma-separated list of grants to create")
+	dbName             = flag.String("db", "", "Database name")
+	role               = flag.String("r", "", "Comma-separated list of roles to create")
+	help               = flag.Bool("h", false, "Print help")
+	showGrants         = flag.Bool("show", false, "Show grants for specified role (requires -r flag)")
+	showRoleName       = flag.String("show-role", "", "Show grants for the specified role name")
+	showUserName       = flag.String("show-user", "", "Show grants for the specified username")
+	configFile         = flag.String("config", "", "Path to configuration file")
+	isGCP              = flag.Bool("gcp", false, "After granting roles to a user, automatically revoke the 'cloudsqlsuperuser' role (for GCP Cloud SQL)")
+	skipPasswordPolicy = flag.Bool("skip-password-policy", false, "Skip password policy enforcement when creating new users with --create-user")
+	authPlugin         = flag.String("auth-plugin", "", "Force a specific authentication plugin (mysql_native_password or caching_sha2_password)")
+	useSQLFile         = flag.Bool("use-sql-file", false, "Create a temporary SQL file for executing commands (helps with complex passwords)")
+	testConnection     = flag.Bool("test-connection", false, "Test connection with provided credentials")
+	testUser           = flag.String("user", "", "Username for connection test (with -test-connection)")
+	testPass           = flag.String("pass", "", "Password for connection test (with -test-connection)")
+	testHost           = flag.String("host", "", "Host for connection test (with -test-connection)")
+	debugPassword      = flag.Bool("debug-password", false, "Print detailed information about the password characters")
 )
 
 // define colors
@@ -37,94 +48,24 @@ var green = color.New(color.FgGreen).SprintFunc()
 var red = color.New(color.FgRed).SprintFunc()
 var yellow = color.New(color.FgYellow).SprintFunc()
 
-//var blue = color.New(color.FgBlue).SprintFunc()
-
-// Configuration holds database connection details
-type Configuration struct {
-	User     string
-	Password string
-	Host     string
-}
-
-// DBManager handles database operations
-type DBManager struct {
-	db     *sql.DB
-	tx     *sql.Tx
-	logger *log.Logger
-}
-
-// Add transaction methods to DBManager
-func (dm *DBManager) beginTx(ctx context.Context) error {
-	var err error
-	dm.tx, err = dm.db.BeginTx(ctx, nil)
-	return err
-}
-
-func (dm *DBManager) commitTx() error {
-	return dm.tx.Commit()
-}
-
-func (dm *DBManager) rollbackTx() error {
-	return dm.tx.Rollback()
-}
-
-// Add new method to DBManager
-func (dm *DBManager) showRoleGrants(role string) error {
-	rows, err := dm.db.Query("SHOW GRANTS FOR `" + role + "`")
-	if err != nil {
-		return fmt.Errorf("showing grants: %w", err)
-	}
-	defer rows.Close()
-
-	dm.logger.Printf("%s Grants for role %s:", green("[+]"), role)
-	for rows.Next() {
-		var grant string
-		if err := rows.Scan(&grant); err != nil {
-			return fmt.Errorf("scanning grants: %w", err)
-		}
-		dm.logger.Printf("    %s", grant)
-	}
-	return rows.Err()
-}
-
-// Add new method to DBManager
-func (dm *DBManager) showUserGrants(username string) error {
-	rows, err := dm.db.Query("SHOW GRANTS FOR `" + username + "`")
-	if err != nil {
-		return fmt.Errorf("showing user grants: %w", err)
-	}
-	defer rows.Close()
-
-	dm.logger.Printf("%s Grants for user %s:", green("[+]"), username)
-	for rows.Next() {
-		var grant string
-		if err := rows.Scan(&grant); err != nil {
-			return fmt.Errorf("scanning grants: %w", err)
-		}
-		dm.logger.Printf("    %s", grant)
-	}
-	return rows.Err()
-}
-
-// Add new method to check MySQL version
-func (dm *DBManager) getMySQLVersion() (int, error) {
-	var version string
-	err := dm.db.QueryRow("SELECT VERSION()").Scan(&version)
-	if err != nil {
-		return 0, err
-	}
-	if strings.HasPrefix(version, "5.7") {
-		return 57, nil
-	}
-	return 80, nil // Assume 8.0+ for anything else
-}
-
 // Initialize flags with validation
 func init() {
 	flag.Parse()
 
+	// Add clearer usage information about password policy
+	if *help {
+		fmt.Println("\nPASSWORD POLICY NOTE:")
+		fmt.Println("  * The password policy (min 30 chars, mixed case, numbers, symbols)")
+		fmt.Println("    ONLY applies when creating NEW USERS with -create-user and -create-pass")
+		fmt.Println("  * It does NOT affect:")
+		fmt.Println("    - MySQL connection credentials (from .my.cnf, config file, or -u/-p flags)")
+		fmt.Println("    - Existing users' passwords")
+		fmt.Println("    - Any other operations in the tool")
+		fmt.Println("\n  Use -skip-password-policy to bypass these requirements when needed")
+	}
+
 	// Read .my.cnf first so we have credentials available for validation
-	mycnfHost, mycnfUser, mycnfPwd := readMyCnf()
+	mycnfHost, mycnfUser, mycnfPwd := auth.ReadMyCnf()
 
 	// Skip .my.cnf message if command line source is provided
 	if *source == "" && mycnfUser != "" {
@@ -182,66 +123,11 @@ func init() {
 			log.Fatal("Required flags missing. Use -h for help")
 		}
 	}
-}
 
-// read the ~/.my.cnf file to get the database credentials
-func readMyCnf() (string, string, string) {
-	var host, user, password, port string
-	var inClientSection bool
-
-	file, err := os.ReadFile(os.Getenv("HOME") + "/.my.cnf")
-	if err != nil {
-		return "", "", ""
+	// Check if .my.cnf contains admin credentials when creating users
+	if *createUser != "" {
+		auth.CheckMyCnfCredentialsForAdmin()
 	}
-
-	lines := strings.Split(string(file), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section := strings.ToLower(strings.Trim(line, "[]"))
-			inClientSection = section == "client"
-			continue
-		}
-
-		if !inClientSection {
-			continue
-		}
-
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		value = strings.Trim(value, "'\"")
-
-		switch key {
-		case "user":
-			user = value
-		case "password":
-			password = value
-		case "host":
-			host = value
-		case "port":
-			port = value
-		}
-	}
-
-	// Only build and return the host string if both host and port were found
-	if host != "" {
-		if port != "" {
-			host = fmt.Sprintf("%s:%s", host, port)
-		} else {
-			host = fmt.Sprintf("%s:3306", host)
-		}
-	}
-
-	return host, user, password
 }
 
 func checkConnection(db *sql.DB) error {
@@ -250,7 +136,8 @@ func checkConnection(db *sql.DB) error {
 	return db.PingContext(ctx)
 }
 
-func connectToDatabase() *DBManager {
+// connect to the database using the new package structure
+func connectToDatabase() *database.Manager {
 	var dsn string
 	var connectionInfo string
 
@@ -276,7 +163,7 @@ func connectToDatabase() *DBManager {
 		connectionInfo = "command line arguments"
 	} else {
 		// Try .my.cnf second
-		mycnfHost, mycnfUser, mycnfPwd := readMyCnf()
+		mycnfHost, mycnfUser, mycnfPwd := auth.ReadMyCnf()
 		if mycnfHost != "" {
 			host = mycnfHost
 			connectionInfo = ".my.cnf"
@@ -334,7 +221,7 @@ func connectToDatabase() *DBManager {
 		log.Printf("%s GCP Cloud SQL detected - will handle cloudsqlsuperuser role", yellow("[!]"))
 	}
 
-	dsn = fmt.Sprintf("%s:%s@tcp(%s)/", user, pwd, host)
+	dsn = auth.BuildDSN(user, pwd, host)
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -351,222 +238,32 @@ func connectToDatabase() *DBManager {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	return &DBManager{db: db, logger: log.New(os.Stdout, "", log.LstdFlags)}
-}
+	// Modified to pass host, username, and password to NewManager
+	dbManager := database.NewManager(db, host, user, pwd)
 
-// check if a MySQL user with the specified username already exists and return their host
-func (dm *DBManager) checkUserExists(username string) (bool, string, error) {
-	var count int
-	var host string = "%"
-
-	err := dm.db.QueryRow("SELECT COUNT(*) FROM mysql.user WHERE User=?", username).Scan(&count)
-	if err != nil {
-		return false, host, err
-	}
-
-	if count > 0 {
-		// Try to get a specific host if one exists
-		err = dm.db.QueryRow("SELECT Host FROM mysql.user WHERE User=? AND Host != '%' LIMIT 1", username).Scan(&host)
-		if err == sql.ErrNoRows {
-			// No specific host found, use default '%'
-			host = "%"
-			err = nil
-		}
-	}
-
-	return count > 0, host, err
-}
-
-// create a function to create a user or users
-func (dm *DBManager) createUser(username string, password string) (string, error) {
-	exists, host, err := dm.checkUserExists(username)
-	if err != nil {
-		return "", fmt.Errorf("checking user existence: %w", err)
-	}
-
-	if exists {
-		dm.logger.Printf("%s User %s@%s already exists", yellow("[!]"), username, host)
-		return host, nil
-	}
-
-	// Try MySQL 5.7 syntax first
-	_, err = dm.db.Exec(fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED WITH mysql_native_password BY '%s'", username, password))
-	if err != nil {
-		// If 5.7 syntax fails, try MySQL 8.x syntax
-		_, err = dm.db.Exec(fmt.Sprintf("CREATE USER `%s` IDENTIFIED BY '%s'", username, password))
-		if err != nil {
-			return "", err
-		}
-	}
-
-	dm.logger.Printf("%s Created user: %s@%%", green("[+]"), username)
-	return "%", nil
-}
-
-// create a function to create a role or roles
-func (dm *DBManager) createRole(role string) error {
-	version, err := dm.getMySQLVersion()
-	if err != nil {
-		return fmt.Errorf("checking MySQL version: %w", err)
-	}
-
-	if version < 80 {
-		dm.logger.Printf("%s Roles are not supported in MySQL 5.7, skipping role creation for: %s", yellow("[!]"), role)
-		return nil
-	}
-
-	exists, _, err := dm.checkUserExists(role)
-	if err != nil {
-		return fmt.Errorf("checking role existence: %w", err)
-	}
-
-	if exists {
-		dm.logger.Printf("%s Role %s already exists", yellow("[!]"), role)
-		return nil
-	}
-
-	// Create role directly since MySQL doesn't support prepared statements for CREATE ROLE
-	_, err = dm.db.Exec(fmt.Sprintf("CREATE ROLE `%s`", role))
-	if err != nil {
-		return fmt.Errorf("creating role: %w", err)
-	}
-
-	dm.logger.Printf("%s Created role: %s", green("[+]"), role)
-	return nil
-}
-
-// create a function to grant privileges to the role or roles
-func (dm *DBManager) grantPrivileges(role string, dbName string, grants string) {
-	var query string
-	if dbName == "*.*" {
-		query = fmt.Sprintf("GRANT %s ON *.* TO `%s`", grants, role)
-	} else {
-		query = fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, role)
-	}
-	_, err := dm.db.Exec(query)
-	if err != nil {
-		log.Fatal(err)
-	}
-	dm.logger.Printf("%s Granted privileges to role: %s", green("[+]"), role)
-}
-
-// getUserHost returns the host for a given user, defaulting to '%' if not found
-func (dm *DBManager) getUserHost(username string) (string, error) {
-	userHost := "%"
-	var count int
-	err := dm.db.QueryRow("SELECT COUNT(*) FROM mysql.user WHERE User = ?", username).Scan(&count)
-	if err != nil {
-		return userHost, fmt.Errorf("checking user existence: %w", err)
-	}
-
-	if count > 0 {
-		// Check if there's a specific host other than '%'
-		err = dm.db.QueryRow("SELECT Host FROM mysql.user WHERE User = ? AND Host != '%' LIMIT 1", username).Scan(&userHost)
-		if err == sql.ErrNoRows {
-			// No specific host found, use default '%'
-			userHost = "%"
-			err = nil
-		}
-	}
-
-	return userHost, err
-}
-
-// create a function to grant roles to users
-func (dm *DBManager) grantRoles(username string, role string) {
-	version, err := dm.getMySQLVersion()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if version < 80 {
-		dm.logger.Printf("%s Roles are not supported in MySQL 5.7, skipping role grant for user: %s", yellow("[!]"), username)
-		return
-	}
-
-	// Get the user's host before any operations
-	userHost, err := dm.getUserHost(username)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// grant privileges to the role
-	_, err = dm.db.Exec(fmt.Sprintf("GRANT `%s` TO `%s`", role, username))
-	if err != nil {
-		log.Fatal(err)
-	}
-	dm.logger.Printf("%s Granted role to user: %s", green("[+]"), username)
-
-	// If -gcp flag is set, revoke cloudsqlsuperuser role
-	if *isGCP {
-		revokeQuery := fmt.Sprintf("REVOKE IF EXISTS 'cloudsqlsuperuser' FROM '%s'@'%s'", username, userHost)
-		_, err = dm.db.Exec(revokeQuery)
-		if err != nil {
-			dm.logger.Printf("%s Warning: Failed to revoke cloudsqlsuperuser from %s@%s: %v", yellow("[!]"), username, userHost, err)
+	// Set authentication plugin if specified
+	if *authPlugin != "" {
+		if *authPlugin != "mysql_native_password" && *authPlugin != "caching_sha2_password" {
+			log.Printf("%s Invalid authentication plugin: %s (must be mysql_native_password or caching_sha2_password)",
+				yellow("[!]"), *authPlugin)
 		} else {
-			dm.logger.Printf("%s Revoked cloudsqlsuperuser role from user: %s@%s", green("[+]"), username, userHost)
+			dbManager.AuthPlugin = *authPlugin
+			log.Printf("%s Forcing authentication plugin: %s",
+				yellow("[!]"), *authPlugin)
 		}
 	}
-}
 
-// create a function to grant privileges to the user or users
-func (dm *DBManager) grantPrivilegesToUser(username string, dbName string, grants string) {
-	var query string
-	if dbName == "*.*" {
-		// Get existing global privileges
-		rows, err := dm.db.Query(fmt.Sprintf("SHOW GRANTS FOR '%s'@'%%'", username))
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer rows.Close()
-
-		var existingGrants string
-		for rows.Next() {
-			var grant string
-			if err := rows.Scan(&grant); err != nil {
-				log.Fatal(err)
-			}
-			if strings.Contains(grant, "ON *.*") {
-				existingGrants = strings.TrimSpace(strings.Split(strings.Split(grant, "GRANT")[1], "ON")[0])
-				break
-			}
-		}
-
-		// Combine existing and new privileges
-		allGrants := grants
-		if existingGrants != "" && existingGrants != "USAGE" {
-			allGrants = existingGrants + "," + grants
-		}
-
-		query = fmt.Sprintf("GRANT %s ON *.* TO `%s`@'%%'", allGrants, username)
-	} else {
-		query = fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, username)
+	// Disable password policy if flag is set
+	if *skipPasswordPolicy {
+		dbManager.Logger.Printf("%s Password policy enforcement disabled", yellow("[!]"))
+		dbManager.PasswordPolicy.MinLength = 0
+		dbManager.PasswordPolicy.RequireUppercase = false
+		dbManager.PasswordPolicy.RequireLowercase = false
+		dbManager.PasswordPolicy.RequireDigits = false
+		dbManager.PasswordPolicy.RequireSpecialChars = false
 	}
 
-	_, err := dm.db.Exec(query)
-	if err != nil {
-		log.Fatal(err)
-	}
-	dm.logger.Printf("%s Granted privileges to user: %s", green("[+]"), username)
-}
-
-// function to add SET DEFAULT ROLE to the user
-func (dm *DBManager) setDefaultRole(username string, role string) {
-	version, err := dm.getMySQLVersion()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if version < 80 {
-		dm.logger.Printf("%s Roles are not supported in MySQL 5.7, skipping default role for user: %s", yellow("[!]"), username)
-		return
-	}
-
-	_, err = dm.db.Exec(fmt.Sprintf("ALTER USER `%s` DEFAULT ROLE `%s`", username, role))
-	if err != nil {
-		log.Fatal(err)
-	}
-	dm.logger.Printf("%s Set default role for user: %s", green("[+]"), username)
+	return dbManager
 }
 
 // main function
@@ -577,15 +274,142 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle connection test first - this is separate from other operations
+	if *testConnection {
+		// Check required parameters
+		if *testUser == "" {
+			log.Fatalf("%s Missing required -user parameter for connection test", red("✘"))
+		}
+		if *testHost == "" {
+			log.Fatalf("%s Missing required -host parameter for connection test", red("✘"))
+		}
+
+		// Call the test connection function
+		log.Printf("%s Testing MySQL connection with provided credentials...", yellow("[!]"))
+		err := database.TestConnection(*testHost, *testUser, *testPass)
+		if err != nil {
+			log.Fatalf("%s Connection test failed: %v", red("✘"), err)
+		}
+		log.Printf("%s Connection test successful!", green("[+]"))
+		return
+	}
+
 	// connect to the source database
 	dbManager := connectToDatabase()
-	defer dbManager.db.Close()
+	defer dbManager.DB.Close()
+
+	// Early password validation with additional warning about special characters
+	if *createUser != "" && *createPassword != "" && !*skipPasswordPolicy {
+		// Create a validator using the same policy as the database manager
+		policy := dbManager.PasswordPolicy
+
+		// Set SQLFileMode flag if using SQL file execution
+		if *useSQLFile {
+			policy.SQLFileMode = true
+			log.Printf("%s Pre-validating NEW USER password with relaxed policy (SQL file mode)...",
+				yellow("[!]"))
+		} else {
+			log.Printf("%s Pre-validating NEW USER password against policy (min length: %d)...",
+				yellow("[!]"), policy.MinLength)
+		}
+
+		// Check for problematic special characters
+		if containsProblematicChars(*createPassword) {
+			log.Printf("%s Warning: Password contains special characters that may need escaping when used with MySQL CLI",
+				yellow("[!]"))
+		}
+
+		if *debugPassword {
+			log.Printf("%s Debugging password characters:", yellow("[!]"))
+			// Use the dedicated debug validation function instead
+			if err := auth.ValidatePasswordWithDebug(*createPassword, policy); err != nil {
+				log.Fatalf("%s Password policy violation for new user creation: %v", red("✘"), err)
+			}
+		} else {
+			// Use the standard validation function for non-debug case
+			if err := auth.ValidatePassword(*createPassword, policy); err != nil {
+				log.Fatalf("%s Password policy violation for new user creation: %v", red("✘"), err)
+			}
+		}
+
+		log.Printf("%s New user password pre-validation successful", green("[+]"))
+	}
+
+	// When using SQL file approach for complex passwords
+	if *useSQLFile && *createUser != "" && *createPassword != "" {
+		log.Printf("%s Using SQL file execution method for complex password handling", yellow("[!]"))
+
+		// Extract host without port for SQL file executor
+		hostParts := strings.Split(dbManager.Host, ":")
+		host := hostParts[0]
+
+		// Create SQL file executor with proper credentials
+		executor := database.NewSQLFileExecutor(
+			host,
+			dbManager.Username,
+			dbManager.Password,
+			log.New(os.Stdout, "", log.LstdFlags))
+
+		// Gather roles to grant - only create roles list if -r flag was provided
+		var rolesToGrant []string
+		if *role != "" {
+			rolesToGrant = strings.Split(*role, ",")
+
+			// Create roles first
+			for _, r := range rolesToGrant {
+				if err := dbManager.CreateRole(r); err != nil {
+					log.Fatalf("Failed to create role: %v", err)
+				}
+			}
+		}
+
+		// Add debug logging for parameters being passed to ExecuteUserCreation
+		log.Printf("%s Debug: Passing to SQL executor - dbName='%s', grants='%s', roles=%v",
+			yellow("[!]"), *dbName, *grants, rolesToGrant)
+
+		// Execute user creation via SQL file
+		err := executor.ExecuteUserCreation(
+			*createUser,
+			*createPassword,
+			*authPlugin,
+			rolesToGrant,
+			*dbName,
+			*grants)
+
+		if err != nil {
+			log.Fatalf("%s Failed to execute SQL file: %v", red("✘"), err)
+		}
+
+		log.Printf("%s User creation via SQL file completed successfully", green("[+]"))
+
+		// Show how to connect with the new user
+		log.Printf("\n%s Connection instructions:", green("[+]"))
+		log.Printf("To connect with MySQL client, use one of these methods:")
+		log.Printf("1. mysql -h %s -u %s -p", host, *createUser)
+		log.Printf("   (then enter password when prompted)")
+		log.Printf("2. Create a ~/.my.cnf file with:")
+		log.Printf("   [client]")
+		log.Printf("   user=%s", *createUser)
+		log.Printf("   password=%s", *createPassword)
+		log.Printf("   host=%s", host)
+
+		return
+	}
 
 	// Handle show commands first as they don't need transactions
+	if *showRoleName != "" {
+		// New flag for showing role grants directly
+		if err := dbManager.ShowRoleGrants(*showRoleName); err != nil {
+			log.Fatalf("Failed to show grants for role %s: %v", *showRoleName, err)
+		}
+		return
+	}
+
 	if *showGrants && *role != "" {
+		// Keep existing behavior for -show -r role1,role2
 		roles := strings.Split(*role, ",")
 		for _, r := range roles {
-			if err := dbManager.showRoleGrants(r); err != nil {
+			if err := dbManager.ShowRoleGrants(r); err != nil {
 				log.Fatalf("Failed to show grants: %v", err)
 			}
 		}
@@ -593,7 +417,7 @@ func main() {
 	}
 
 	if *showUserName != "" {
-		if err := dbManager.showUserGrants(*showUserName); err != nil {
+		if err := dbManager.ShowUserGrants(*showUserName); err != nil {
 			log.Fatalf("Failed to show user grants: %v", err)
 		}
 		return
@@ -601,7 +425,7 @@ func main() {
 
 	ctx := context.Background()
 	// Start transaction
-	if err := dbManager.beginTx(ctx); err != nil {
+	if err := dbManager.BeginTx(ctx); err != nil {
 		log.Fatalf("Failed to start transaction: %v", err)
 	}
 
@@ -610,7 +434,7 @@ func main() {
 		// Create roles first
 		roles := strings.Split(*role, ",")
 		for _, r := range roles {
-			if err := dbManager.createRole(r); err != nil {
+			if err := dbManager.CreateRole(r); err != nil {
 				log.Fatalf("Failed to create role: %v", err)
 			}
 		}
@@ -618,13 +442,15 @@ func main() {
 		// Grant privileges to roles if specified
 		if *dbName != "" && *grants != "" {
 			for _, r := range roles {
-				dbManager.grantPrivileges(r, *dbName, *grants)
+				if err := dbManager.GrantPrivileges(r, *dbName, *grants); err != nil {
+					log.Fatalf("Failed to grant privileges: %v", err)
+				}
 			}
 		}
 
 		// Create user if specified
 		if *createUser != "" && *createPassword != "" {
-			_, err := dbManager.createUser(*createUser, *createPassword)
+			_, err := dbManager.CreateUser(*createUser, *createPassword)
 			if err != nil {
 				log.Fatalf("Failed to create user: %v", err)
 			}
@@ -636,7 +462,9 @@ func main() {
 			targetUser = *username
 		}
 		for _, r := range roles {
-			dbManager.grantRoles(targetUser, r)
+			if err := dbManager.GrantRoles(targetUser, r, *isGCP); err != nil {
+				log.Fatalf("Failed to grant role: %v", err)
+			}
 		}
 	} else {
 		// Non-GCP flow - existing logic
@@ -644,7 +472,7 @@ func main() {
 		if *role != "" {
 			roles := strings.Split(*role, ",")
 			for _, r := range roles {
-				if err := dbManager.createRole(r); err != nil {
+				if err := dbManager.CreateRole(r); err != nil {
 					log.Fatalf("Failed to create role: %v", err)
 				}
 			}
@@ -654,7 +482,9 @@ func main() {
 		if *role != "" && *dbName != "" && *grants != "" {
 			roles := strings.Split(*role, ",")
 			for _, r := range roles {
-				dbManager.grantPrivileges(r, *dbName, *grants)
+				if err := dbManager.GrantPrivileges(r, *dbName, *grants); err != nil {
+					log.Fatalf("Failed to grant privileges: %v", err)
+				}
 			}
 		}
 
@@ -663,7 +493,7 @@ func main() {
 			users := strings.Split(*createUser, ",")
 			passwords := strings.Split(*createPassword, ",")
 			for i, u := range users {
-				_, err := dbManager.createUser(u, passwords[i])
+				_, err := dbManager.CreateUser(u, passwords[i])
 				if err != nil {
 					log.Fatalf("Failed to create user: %v", err)
 				}
@@ -681,7 +511,9 @@ func main() {
 			roles := strings.Split(*role, ",")
 			for _, u := range users {
 				for _, r := range roles {
-					dbManager.grantRoles(u, r)
+					if err := dbManager.GrantRoles(u, r, false); err != nil {
+						log.Fatalf("Failed to grant role: %v", err)
+					}
 				}
 			}
 		}
@@ -689,8 +521,10 @@ func main() {
 		// grant privileges to users
 		if *createUser != "" && *dbName != "" && *grants != "" {
 			users := strings.Split(*createUser, ",")
-			for _, u := range users {
-				dbManager.grantPrivilegesToUser(u, *dbName, *grants)
+			for _, u := range users { // Fix: add "range" keyword here
+				if err := dbManager.GrantPrivilegesToUser(u, *dbName, *grants); err != nil {
+					log.Fatalf("Failed to grant privileges to user: %v", err)
+				}
 			}
 		}
 
@@ -700,17 +534,30 @@ func main() {
 			roles := strings.Split(*role, ",")
 			for _, u := range users {
 				for _, r := range roles {
-					dbManager.setDefaultRole(u, r)
+					if err := dbManager.SetDefaultRole(u, r); err != nil {
+						log.Fatalf("Failed to set default role: %v", err)
+					}
 				}
 			}
 		}
 	}
 
 	// Commit transaction
-	if err := dbManager.commitTx(); err != nil {
-		if rbErr := dbManager.rollbackTx(); rbErr != nil {
+	if err := dbManager.CommitTx(); err != nil {
+		if rbErr := dbManager.RollbackTx(); rbErr != nil {
 			log.Printf("Failed to rollback: %v", rbErr)
 		}
 		log.Fatalf("Failed to commit transaction: %v", err)
 	}
+}
+
+// Helper function to detect potentially problematic password characters
+func containsProblematicChars(password string) bool {
+	problematic := []string{"`", "$", "\\", "|", "&", ";", "<", ">", "(", ")", "*"}
+	for _, char := range problematic {
+		if strings.Contains(password, char) {
+			return true
+		}
+	}
+	return false
 }

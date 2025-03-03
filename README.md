@@ -1,16 +1,20 @@
 # go-create
 
-## Description:
-This tool is used to create users, roles, and grants in MySQL.  
+## Description
 
-## !!!!WARNING!!!!
-This is only used currently for testing. Do not use in PROD or any environment that you care about. 
+This tool is used to create users, roles, and grants in MySQL. It features robust handling of complex passwords and role-based access control.
+
+## WARNING
+
+This is only used currently for testing. Do not use in PROD or any environment that you care about.
 More testing and validation needs to happen before this is ready for PROD.
 
 ## Configuration
+
 You can store your MySQL connection details in a configuration file. By default, the tool looks for `.go-create.json` in your home directory, or you can specify a different path using the `-config` flag.
 
 Example configuration file:
+
 ```json
 {
   "mysql": {
@@ -23,12 +27,14 @@ Example configuration file:
 ```
 
 Credentials precedence:
+
 1. Command line flags (-u, -p, -s)
 2. Configuration file specified by -config
 3. Default .go-create.json in home directory
 4. ~/.my.cnf file
 
-## Usage:
+## Usage
+
 ```GO
 go-create -h
   -config string
@@ -59,27 +65,31 @@ go-create -h
         Username for the admin connection
 ```
 
-## Examples:
+## Examples
 
 ### 1. Creating a user with role and privileges
+
 ```GO
 # Create user 'lisa' with role 'app_write' and specific database privileges
 go-create -s 10.8.0.15 -u lisa -p OxFF29szWNQ962hUa0Toez3 -r app_write -g select,insert,update,delete -db app_db 
 ```
 
 ### 2. Creating a role with privileges
+
 ```GO
 # Create role 'app_read2' with SELECT privilege on app_db
 go-create -s 10.8.0.15 -r app_read2 -g select -db app_db
 ```
 
 ### 3. Showing user grants
+
 ```GO
 # Show grants for user 'lisa'
 go-create -show-user lisa
 ```
 
 ### 4. Creating a user with role in Google Cloud SQL
+
 ```GO
 # Create user 'repl' with role 'repl_role', specific database privileges, and revoke cloudsqlsuperuser
 # Note: -u and -p are for admin credentials, --create-user and --create-pass are for the new user
@@ -97,6 +107,7 @@ go-create -s cloud-sql-instance -u root -p s3cr3t --create-user repl --create-pa
 Note: The -gcp flag specifically handles Google Cloud SQL instances where users are automatically granted the 'cloudsqlsuperuser' role. When this flag is used, the tool will automatically revoke this role after granting the specified roles.
 
 ### 5. Creating a user with role in Google Cloud SQL
+
 ```GO
 # Create user 'repl' with role 'repl_role', specific database privileges, and revoke cloudsqlsuperuser
 go-create -s cloud-sql-instance -u root -p s3cr3t --create-user repl --create-pass replpass -g select,insert,update,delete -db app_db -r repl_role -gcp
@@ -110,11 +121,13 @@ go-create -s cloud-sql-instance -u root -p s3cr3t --create-user repl --create-pa
 ```
 
 Note: When using with Google Cloud SQL:
+
 - The `-u` and `-p` flags are for the admin credentials (to connect to the database)
 - The `--create-user` and `--create-pass` flags specify the new user to create
 - The `-gcp` flag ensures the cloudsqlsuperuser role is revoked after granting the specified roles
 
 ### 6. Using credentials from .my.cnf
+
 ```GO
 # Create role 'app_read' with SELECT privilege on chaos database
 # Note: No -u/-p/-s flags needed when using .my.cnf
@@ -128,6 +141,7 @@ go-create -r app_read -g select -db chaos
 ```
 
 ### 7. Show role privileges
+
 ```GO
 # Show privileges for role 'app_read'
 go-create -r app_read -show
@@ -141,6 +155,7 @@ go-create -r app_read -show
 ```
 
 ### 8. Creating a user with password, role and privileges
+
 ```GO
 # Create user 'lisa' with password, role 'app_write', and specific database privileges
 go-create --create-user lisa --create-pass OxFF29szWNQ962hUa0Toez3 -r app_write -g select,insert,update,delete -db chaos
@@ -174,6 +189,7 @@ go-create -show-user lisa
 ```
 
 ## Validation
+
 ```GO
 ❯ mysql -vv -e "source test.sql" 
 --------------
@@ -281,8 +297,10 @@ SELECT user,host FROM mysql.user
 Bye
 ```
 
-## Using go-pass to validate:
+## Using go-pass to validate
+
 - [go-pass](https://github.com/ChaosHour/go-pass)
+
 ```GO
 go-pass -s 10.8.0.15 -f show_users.sql -o lisa | sed -e 's/CREATE USER/CREATE USER IF NOT EXISTS/g' -e '/^-- Grants/d' | grep -v 'Dumping' > only-lisa.sql
 2023/06/25 10:59:42 [+] Connecting to database: root:root@tcp(10.8.0.15:3306)/mysql
@@ -295,7 +313,8 @@ cat only-lisa.sql
  GRANT `app_write`@`%` TO `lisa`@`%`;
 ```
 
-## Example - 2:
+## Example - 2
+
 ```GO
 Create a new role called app_read2 with grants and db:
 
@@ -347,7 +366,8 @@ mysql> show grants;
 
 ```
 
-## Example - 3:
+## Example - 3
+
 ```GO
 Show grants for an existing user:
 
