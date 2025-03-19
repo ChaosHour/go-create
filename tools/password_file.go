@@ -46,11 +46,11 @@ func main() {
 
 	if show {
 		fmt.Println("\nTo use this password file with go-create:")
-		fmt.Printf("  ./bin/go-create -create-user USERNAME -create-pass \"$(cat %s)\" ...\n", filename)
+		fmt.Printf("  ./bin/go-create -create-user USERNAME -create-pass \"$(< %s)\" ...\n", filename)
 		fmt.Println("\nTo test connection with this password:")
-		fmt.Printf("  ./bin/go-create -test-connection -user USERNAME -pass \"$(cat %s)\" -host HOSTNAME\n", filename)
+		fmt.Printf("  ./bin/go-create -test-connection -user USERNAME -pass \"$(< %s)\" -host HOSTNAME\n", filename)
 		fmt.Println("\nFor MySQL client:")
-		fmt.Printf("  mysql -u USERNAME -p\"$(cat %s)\" -h HOST\n", filename)
+		fmt.Printf("  mysql -u USERNAME -p\"$(< %s)\" -h HOST\n", filename)
 		fmt.Println("\nTo delete this file when done:")
 		fmt.Printf("  rm %s\n", filename)
 	}
