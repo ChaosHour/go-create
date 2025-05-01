@@ -188,6 +188,27 @@ go-create -show-user lisa
 2025/02/17 10:38:10     GRANT `app_write`@`%` TO `lisa`@`%`
 ```
 
+## Testing the Connection After User Creation
+
+After creating a user, you can test the connection using the MySQL client:
+
+```sh
+mysql -h <host> -u <new_user> -p
+```
+Enter the password when prompted.
+
+Or, using the password file created earlier:
+
+```sh
+mysql -h <host> -u <new_user> -p"$(< /path/to/password_file.txt)"
+```
+
+Alternatively, you can use the `go-create` tool's built-in connection test:
+
+```sh
+go-create -test-connection -user <new_user> -pass "<password>" -host <host>
+```
+
 ## Validation
 
 ```GO

@@ -382,16 +382,18 @@ func main() {
 
 		log.Printf("%s User creation via SQL file completed successfully", green("[+]"))
 
-		// Show how to connect with the new user
-		log.Printf("\n%s Connection instructions:", green("[+]"))
-		log.Printf("To connect with MySQL client, use one of these methods:")
-		log.Printf("1. mysql -h %s -u %s -p", host, *createUser)
-		log.Printf("   (then enter password when prompted)")
-		log.Printf("2. Create a ~/.my.cnf file with:")
-		log.Printf("   [client]")
-		log.Printf("   user=%s", *createUser)
-		log.Printf("   password=%s", *createPassword)
-		log.Printf("   host=%s", host)
+		// Commented out: Connection instructions block
+		/*
+			log.Printf("\n%s Connection instructions:", green("[+]"))
+			log.Printf("To connect with MySQL client, use one of these methods:")
+			log.Printf("1. mysql -h %s -u %s -p", host, *createUser)
+			log.Printf("   (then enter password when prompted)")
+			log.Printf("2. Create a ~/.my.cnf file with:")
+			log.Printf("   [client]")
+			log.Printf("   user=%s", *createUser)
+			log.Printf("   password=%s", *createPassword)
+			log.Printf("   host=%s", host)
+		*/
 
 		return
 	}

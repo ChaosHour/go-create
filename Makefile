@@ -1,4 +1,3 @@
-
 # Build settings
 BINARY_NAME=go-create
 MAIN_PATH=./cmd/create
@@ -66,6 +65,12 @@ install:
 run: build
 	@echo "Running ${BINARY_NAME}..."
 	./bin/$(BINARY_NAME)
+
+password-tool:
+	@echo "Building password_file tool..."
+	@mkdir -p bin
+	$(GO) build -o bin/password_file ./tools/password_file.go
+	@echo "Binary created at bin/password_file"
 
 # Cross-compilation targets
 build-linux:
