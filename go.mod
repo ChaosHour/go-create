@@ -3,6 +3,7 @@ module github.com/ChaosHour/go-create
 go 1.20
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/fatih/color v1.15.0
 	github.com/go-sql-driver/mysql v1.7.1
 )

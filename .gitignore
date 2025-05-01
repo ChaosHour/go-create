@@ -16,9 +16,10 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+bin/
 
 # Go workspace file
 go.work
 
 # Go files:
-*create_user.go*
+*go-create*
