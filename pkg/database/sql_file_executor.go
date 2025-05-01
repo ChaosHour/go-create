@@ -101,8 +101,14 @@ func (e *SQLFileExecutor) ExecuteUserCreation(username, password, authPlugin str
 	// 5. For MySQL 5.7 or when no roles are specified:
 	// Grant privileges directly to the user ONLY when NO roles are specified
 	if dbName != "" && grants != "" && len(roles) == 0 {
-		e.Logger.Printf("%s Adding direct grants to user (no roles specified): GRANT %s ON %s.* TO '%s'@'%%'",
-			yellow("[!]"), grants, dbName, username)
+		// Fix: Only print *.* for global grants, not *.*.*
+		if dbName == "*.*" {
+			e.Logger.Printf("%s Adding direct grants to user (no roles specified): GRANT %s ON *.* TO '%s'@'%%'",
+				yellow("[!]"), grants, username)
+		} else {
+			e.Logger.Printf("%s Adding direct grants to user (no roles specified): GRANT %s ON `%s`.* TO '%s'@'%%'",
+				yellow("[!]"), grants, dbName, username)
+		}
 		if dbName == "*.*" {
 			sqlCommands = append(sqlCommands, fmt.Sprintf(
 				"GRANT %s ON *.* TO '%s'@'%%';",
