@@ -4,15 +4,25 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
+
+	"github.com/ChaosHour/go-create/pkg/auth"
 )
 
 // TestConnection attempts to connect to a MySQL server using the provided credentials
 func TestConnection(host, username, password string) error {
 	log.Printf("Testing connection to %s as user %s...", host, username)
 
-	// Create DSN for test connection
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/?timeout=5s", username, password, host)
+	// Create DSN for test connection using the centralized BuildDSN function
+	dsn := auth.BuildDSNWithParams(username, password, host)
+
+	// Add a timeout parameter to the DSN
+	if strings.Contains(dsn, "?") {
+		dsn += "&timeout=5s"
+	} else {
+		dsn += "?timeout=5s"
+	}
 
 	// Open a test connection
 	testDB, err := sql.Open("mysql", dsn)
