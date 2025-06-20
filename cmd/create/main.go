@@ -185,10 +185,32 @@ func connectToDatabase() *database.Manager {
 			}
 			if cfg.MySQL.Host != "" && host == "" {
 				host = cfg.MySQL.Host
-				if cfg.MySQL.Port != "" {
-					host = fmt.Sprintf("%s:%s", host, cfg.MySQL.Port)
+
+				// Check if host from config already contains parameters
+				if strings.Contains(host, "?") {
+					parts := strings.SplitN(host, "?", 2)
+					hostname := parts[0]
+					params := parts[1]
+
+					// Add port to hostname part if not already present
+					if !strings.Contains(hostname, ":") {
+						if cfg.MySQL.Port != "" {
+							hostname = fmt.Sprintf("%s:%s", hostname, cfg.MySQL.Port)
+						} else {
+							hostname = fmt.Sprintf("%s:3306", hostname)
+						}
+					}
+					// Reassemble the host string
+					host = fmt.Sprintf("%s?%s", hostname, params)
 				} else {
-					host = fmt.Sprintf("%s:3306", host)
+					// No parameters, just check for port
+					if !strings.Contains(host, ":") {
+						if cfg.MySQL.Port != "" {
+							host = fmt.Sprintf("%s:%s", host, cfg.MySQL.Port)
+						} else {
+							host = fmt.Sprintf("%s:3306", host)
+						}
+					}
 				}
 				connectionInfo = *configFile
 			}
@@ -221,7 +243,7 @@ func connectToDatabase() *database.Manager {
 		log.Printf("%s GCP Cloud SQL detected - will handle cloudsqlsuperuser role", yellow("[!]"))
 	}
 
-	dsn = auth.BuildDSN(user, pwd, host)
+	dsn = auth.BuildDSNWithParams(user, pwd, host)
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -339,13 +361,18 @@ func main() {
 	if *useSQLFile && *createUser != "" && *createPassword != "" {
 		log.Printf("%s Using SQL file execution method for complex password handling", yellow("[!]"))
 
-		// Extract host without port for SQL file executor
-		hostParts := strings.Split(dbManager.Host, ":")
-		host := hostParts[0]
+		// Extract host without port and parameters for SQL file executor
+		hostForSQLFile := dbManager.Host
+		if strings.Contains(hostForSQLFile, "?") {
+			hostForSQLFile = strings.Split(hostForSQLFile, "?")[0]
+		}
+		if strings.Contains(hostForSQLFile, ":") {
+			hostForSQLFile = strings.Split(hostForSQLFile, ":")[0]
+		}
 
 		// Create SQL file executor with proper credentials
 		executor := database.NewSQLFileExecutor(
-			host,
+			hostForSQLFile,
 			dbManager.Username,
 			dbManager.Password,
 			log.New(os.Stdout, "", log.LstdFlags))
