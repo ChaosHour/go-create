@@ -23,3 +23,9 @@ go.work
 
 # Go files:
 *go-create*
+
+# Local private docs
+IMPLEMENTATION_SUMMARY.md
+PHASE1_SECURITY_FIXES.md
+PHASE2_TESTING_QUALITY.md
+PHASE3_DOCUMENTATION.md
