@@ -1,0 +1,73 @@
+run:
+  timeout: 5m
+  tests: true
+  build-tags: []
+
+linters:
+  enable:
+    - errcheck        # Checks for unchecked errors
+    - gosimple        # Simplify code
+    - govet           # Reports suspicious constructs
+    - ineffassign     # Detects ineffectual assignments
+    - staticcheck     # Advanced static analysis
+    - unused          # Finds unused code
+    - gofmt           # Checks code formatting
+    - goimports       # Checks import ordering
+    - misspell        # Finds misspellings
+    - revive          # Linting framework
+    - unconvert       # Removes unnecessary type conversions
+    - unparam         # Finds unused function parameters
+    - gosec           # Security focused linter
+
+linters-settings:
+  errcheck:
+    check-blank: false
+    check-type-assertions: false
+  
+  govet:
+    enable-all: true
+    disable:
+      - shadow  # Can be noisy
+  
+  gofmt:
+    simplify: true
+  
+  goimports:
+    local-prefixes: github.com/ChaosHour/go-create
+  
+  revive:
+    confidence: 0.8
+  
+  gosec:
+    severity: medium
+    confidence: medium
+    excludes:
+      - G104  # Audit errors not checked (we'll handle these gradually)
+      - G304  # File path provided as input (needed for config files)
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+    
+    # Exclude known issues
+    - text: "G101: Potential hardcoded credentials"
+      linters:
+        - gosec
+    
+    # Allow certain patterns
+    - text: "should have comment"
+      linters:
+        - revive
+  
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true

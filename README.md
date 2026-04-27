@@ -2,12 +2,51 @@
 
 ## Description
 
-This tool is used to create users, roles, and grants in MySQL. It features robust handling of complex passwords and role-based access control.
+A command-line tool for managing MySQL users, roles, and grants with robust handling of complex passwords and role-based access control. Designed for MySQL 5.7 and 8.0+.
 
-## WARNING
+## Features
 
-This is only used currently for testing. Do not use in PROD or any environment that you care about.
-More testing and validation needs to happen before this is ready for PROD.
+- Create MySQL users and roles
+- Manage grants and privileges
+- Role-based access control (MySQL 8.0+)
+- Support for complex passwords with special characters
+- Multiple authentication methods (command line, config file, .my.cnf)
+- Google Cloud SQL compatibility
+- Secure password handling and validation
+- Flexible configuration options
+
+## Requirements
+
+- Go 1.20 or higher
+- MySQL 5.7 or 8.0+ server
+- Admin access to the MySQL server
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/ChaosHour/go-create.git
+cd go-create
+
+# Build the binary
+make build
+
+# The binary will be created at bin/go-create
+```
+
+## Quick Start
+
+```bash
+# Create a user with a role and database privileges
+go-create --create-user myuser --create-pass "MyP@ssw0rd123!" \
+  -r app_read -g select -db myapp
+
+# Show grants for a user
+go-create -show-user myuser
+
+# Create a role with specific privileges
+go-create -r app_write -g select,insert,update,delete -db myapp
+```
 
 ## Configuration
 
@@ -32,6 +71,57 @@ Credentials precedence:
 2. Configuration file specified by -config
 3. Default .go-create.json in home directory
 4. ~/.my.cnf file
+
+## Password Policy
+
+When creating new users with `--create-user` and `--create-pass`, passwords must meet these requirements:
+
+- Minimum 30 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one digit
+- At least one special character
+
+**Note:** The password policy ONLY applies to new user creation, not to admin connection credentials.
+
+### Forbidden Characters (without -use-sql-file flag)
+
+The following characters can cause issues with MySQL and should be avoided unless using the `-use-sql-file` flag:
+- Single quotes: `'`
+- Double quotes: `"`
+- Backslash: `\`
+- Semicolon: `;`
+- Double dash: `--`
+- Hash: `#`
+- At symbol: `@`
+
+### Shell-Problematic Characters
+
+These characters may cause issues with command-line MySQL operations (warnings will be shown):
+- Dollar sign: `$`
+- Pipe: `|`
+- Ampersand: `&`
+- Angle brackets: `<` `>`
+- Asterisk: `*`
+- Question mark: `?`
+- Parentheses: `(` `)`
+- Backtick: `` ` ``
+- Space
+
+### Bypassing Password Policy
+
+Use `-skip-password-policy` to bypass validation (use with caution):
+
+```bash
+go-create --create-user testuser --create-pass "short" -skip-password-policy
+```
+
+For complex passwords with special characters, use the `-use-sql-file` flag:
+
+```bash
+go-create --create-user myuser --create-pass "Complex'P@ss\"w0rd!" \
+  -use-sql-file -r app_role -db myapp -g select
+```
 
 ## Usage
 

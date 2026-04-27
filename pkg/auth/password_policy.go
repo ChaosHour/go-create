@@ -40,10 +40,6 @@ func DefaultPasswordPolicy() PasswordPolicy {
 // ValidatePassword checks if a password meets the specified policy
 // This is only used for new user creation, not for authentication
 func ValidatePassword(password string, policy PasswordPolicy) error {
-	// Add debug output
-	fmt.Printf("DEBUG: Validating password length: %d against policy min: %d\n",
-		len(password), policy.MinLength)
-
 	if len(password) < policy.MinLength {
 		return fmt.Errorf("password must be at least %d characters long (got %d)",
 			policy.MinLength, len(password))
