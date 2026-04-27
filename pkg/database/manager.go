@@ -1,3 +1,6 @@
+// Package database provides MySQL database management operations including
+// user creation, role management, privilege grants, and transaction handling.
+// It supports both MySQL 5.7 and 8.0+ with automatic version detection.
 package database
 
 import (
@@ -19,7 +22,9 @@ var (
 	red    = color.New(color.FgRed).SprintFunc() // Add the missing red color
 )
 
-// Manager handles database operations
+// Manager handles database operations for MySQL user and role management.
+// It provides transaction support, password policy enforcement, and
+// MySQL version detection for compatibility across 5.7 and 8.0+.
 type Manager struct {
 	DB             *sql.DB
 	Tx             *sql.Tx
@@ -31,7 +36,9 @@ type Manager struct {
 	Password       string // Add Password field for connection details
 }
 
-// NewManager creates a new database manager
+// NewManager creates a new database manager with the specified connection and credentials.
+// It initializes the password policy with default settings requiring strong passwords
+// for new user creation (30+ chars, mixed case, digits, special chars).
 func NewManager(db *sql.DB, host, username, password string) *Manager {
 	// Add debug output to confirm policy is set
 	policy := auth.DefaultPasswordPolicy()
@@ -180,8 +187,11 @@ func (dm *Manager) CreateUser(username, password string) (string, error) {
 
 	// Log the actual MySQL version for debugging
 	var versionStr string
-	dm.DB.QueryRow("SELECT @@version").Scan(&versionStr)
-	dm.Logger.Printf("%s MySQL server version: %s (parsed as: %d)", yellow("[!]"), versionStr, version)
+	if err := dm.DB.QueryRow("SELECT @@version").Scan(&versionStr); err != nil {
+		dm.Logger.Printf("%s Could not query MySQL version: %v", yellow("[!]"), err)
+	} else {
+		dm.Logger.Printf("%s MySQL server version: %s (parsed as: %d)", yellow("[!]"), versionStr, version)
+	}
 
 	var authPlugin string
 
