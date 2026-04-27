@@ -1,3 +1,6 @@
+// Package auth provides authentication and credential management utilities
+// for MySQL connections. It includes DSN building, password validation,
+// and secure credential handling with sanitization capabilities.
 package auth
 
 import (
@@ -38,4 +41,29 @@ func BuildDSNWithParams(username, password, hostString string) string {
 	}
 
 	return dsn
+}
+
+// SanitizeDSN removes sensitive information from a DSN for safe logging
+func SanitizeDSN(dsn string) string {
+	// Pattern: user:password@tcp(host:port)/
+	if idx := strings.Index(dsn, ":"); idx != -1 {
+		if endIdx := strings.Index(dsn[idx:], "@tcp"); endIdx != -1 {
+			// Replace password portion
+			return dsn[:idx+1] + "****@tcp" + dsn[idx+endIdx+4:]
+		}
+	}
+	return dsn
+}
+
+// SanitizeError removes sensitive information from error messages
+func SanitizeError(err error, password string) error {
+	if err == nil {
+		return nil
+	}
+	errMsg := err.Error()
+	// Replace any occurrence of the password
+	if password != "" && strings.Contains(errMsg, password) {
+		errMsg = strings.ReplaceAll(errMsg, password, "****")
+	}
+	return fmt.Errorf("%s", errMsg)
 }

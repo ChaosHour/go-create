@@ -2,13 +2,10 @@ package database
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/fatih/color"
 )
@@ -36,21 +33,26 @@ func (e *SQLFileExecutor) ExecuteUserCreation(username, password, authPlugin str
 	yellow := color.New(color.FgYellow).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 
-	// Create a temporary directory in the user's home directory
-	homeDir, err := os.UserHomeDir()
+	// Create a secure temporary directory
+	tempDir, err := os.MkdirTemp("", "go-create-*")
 	if err != nil {
-		return fmt.Errorf("getting home directory: %w", err)
-	}
-
-	// Create a temporary directory with secure permissions
-	tempDir := filepath.Join(homeDir, ".go-create-tmp")
-	if err := os.MkdirAll(tempDir, 0700); err != nil {
 		return fmt.Errorf("creating temp directory: %w", err)
 	}
+	// Ensure cleanup on exit
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			e.Logger.Printf("%s Warning: Failed to remove temp directory %s: %v",
+				yellow("[!]"), tempDir, err)
+		}
+	}()
 
-	// Generate a unique filename
-	timestamp := time.Now().Format("20060102-150405")
-	filename := filepath.Join(tempDir, fmt.Sprintf("create-user-%s-%s.sql", username, timestamp))
+	// Create a secure temporary SQL file
+	sqlFile, err := os.CreateTemp(tempDir, fmt.Sprintf("create-user-%s-*.sql", username))
+	if err != nil {
+		return fmt.Errorf("creating temp SQL file: %w", err)
+	}
+	filename := sqlFile.Name()
+	sqlFile.Close() // Close it so we can write to it later
 
 	// Create SQL statements with proper role-based access control
 	var sqlCommands []string
@@ -142,23 +144,23 @@ func (e *SQLFileExecutor) ExecuteUserCreation(username, password, authPlugin str
 	sqlContent := strings.Join(sqlCommands, "\n")
 
 	// Write SQL to file
-	if err := ioutil.WriteFile(filename, []byte(sqlContent), 0600); err != nil {
+	if err := os.WriteFile(filename, []byte(sqlContent), 0600); err != nil {
 		return fmt.Errorf("writing SQL file: %w", err)
 	}
 
-	// Print SQL file contents with NO masking (as requested)
-	e.Logger.Printf("%s Full SQL file contents (unmasked):", yellow("[!]"))
+	// Log SQL file creation without exposing passwords
+	e.Logger.Printf("%s SQL file created with user creation commands (credentials masked for security)", green("[+]"))
+	// Show structure without passwords for debugging if needed
 	for _, line := range strings.Split(sqlContent, "\n") {
-		e.Logger.Printf("    %s", line)
+		if strings.Contains(line, "BY") && (strings.Contains(line, "IDENTIFIED") || strings.Contains(line, "password=")) {
+			// Mask the password portion
+			e.Logger.Printf("    %s", maskPasswordInSQL(line))
+		} else {
+			e.Logger.Printf("    %s", line)
+		}
 	}
 
-	defer func() {
-		// Clean up file
-		if err := os.Remove(filename); err != nil {
-			e.Logger.Printf("%s Warning: Failed to remove temp SQL file %s: %v",
-				yellow("[!]"), filename, err)
-		}
-	}()
+	// Note: File cleanup is handled by the deferred RemoveAll at the function start
 
 	e.Logger.Printf("%s Created SQL file for user creation: %s",
 		green("[+]"), filename)
@@ -179,11 +181,17 @@ func (e *SQLFileExecutor) ExecuteUserCreation(username, password, authPlugin str
 
 	// Attempt 2: Using password file
 	e.Logger.Printf("%s Trying connection method 2: Using password file...", yellow("[!]"))
-	pwdFile := filepath.Join(tempDir, "mysql-pwd.txt")
-	if err := ioutil.WriteFile(pwdFile, []byte(e.Password), 0600); err == nil {
-		defer os.Remove(pwdFile)
+	pwdFile, err := os.CreateTemp(tempDir, "mysql-pwd-*.txt")
+	if err == nil {
+		pwdFilename := pwdFile.Name()
+		if _, err := pwdFile.Write([]byte(e.Password)); err != nil {
+			e.Logger.Printf("%s Failed to write password file: %v", yellow("[!]"), err)
+		}
+		pwdFile.Close()
+		// No need for explicit defer os.Remove - parent tempDir cleanup will handle it
+
 		cmd = exec.Command("mysql", "-h", e.Host, "-u", e.User,
-			fmt.Sprintf("--password-file=%s", pwdFile), "-e", fmt.Sprintf("source %s", filename))
+			fmt.Sprintf("--password-file=%s", pwdFilename), "-e", fmt.Sprintf("source %s", filename))
 		output, err = cmd.CombinedOutput()
 		if err == nil {
 			e.Logger.Printf("%s Method 2 successful", green("[+]"))
@@ -194,12 +202,18 @@ func (e *SQLFileExecutor) ExecuteUserCreation(username, password, authPlugin str
 
 	// Attempt 3: Create a temporary configuration file
 	e.Logger.Printf("%s Trying connection method 3: Using temporary my.cnf...", yellow("[!]"))
-	cnfFile := filepath.Join(tempDir, "my-temp.cnf")
-	cnfContent := fmt.Sprintf("[client]\nuser=%s\npassword=\"%s\"\nhost=%s\n",
-		e.User, escapeCnfPassword(e.Password), e.Host)
-	if err := ioutil.WriteFile(cnfFile, []byte(cnfContent), 0600); err == nil {
-		defer os.Remove(cnfFile)
-		cmd = exec.Command("mysql", fmt.Sprintf("--defaults-file=%s", cnfFile),
+	cnfFile, err := os.CreateTemp(tempDir, "my-temp-*.cnf")
+	if err == nil {
+		cnfFilename := cnfFile.Name()
+		cnfContent := fmt.Sprintf("[client]\nuser=%s\npassword=\"%s\"\nhost=%s\n",
+			e.User, escapeCnfPassword(e.Password), e.Host)
+		if _, err := cnfFile.Write([]byte(cnfContent)); err != nil {
+			e.Logger.Printf("%s Failed to write config file: %v", yellow("[!]"), err)
+		}
+		cnfFile.Close()
+		// No need for explicit defer os.Remove - parent tempDir cleanup will handle it
+
+		cmd = exec.Command("mysql", fmt.Sprintf("--defaults-file=%s", cnfFilename),
 			"-e", fmt.Sprintf("source %s", filename))
 		output, err = cmd.CombinedOutput()
 		if err == nil {
@@ -244,4 +258,21 @@ func escapeCnfPassword(s string) string {
 	return strings.Replace(s, "\"", "\\\"", -1)
 }
 
-// Remove the unused escapeSQLString function
+// maskPasswordInSQL masks password values in SQL statements for logging
+func maskPasswordInSQL(sql string) string {
+	// Pattern: IDENTIFIED BY 'password' or password="value"
+	if idx := strings.Index(sql, "BY '"); idx != -1 {
+		// Find the closing quote
+		start := idx + 4
+		if end := strings.Index(sql[start:], "'"); end != -1 {
+			return sql[:start] + "****MASKED****" + sql[start+end:]
+		}
+	}
+	if idx := strings.Index(sql, "password=\""); idx != -1 {
+		start := idx + 10
+		if end := strings.Index(sql[start:], "\""); end != -1 {
+			return sql[:start] + "****MASKED****" + sql[start+end:]
+		}
+	}
+	return sql
+}
