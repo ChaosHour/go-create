@@ -488,3 +488,228 @@ Show grants for an existing user:
     GRANT USAGE ON *.* TO `lisa`@`%`
     GRANT SELECT, INSERT, UPDATE, DELETE ON `app_db`.* TO `lisa`@`%`
     GRANT `app_write`@`%` TO `lisa`@`%`
+```
+
+---
+
+## Real-World Examples with Validation
+
+The following examples were run against a local MySQL 8.0.43 instance and show the actual output at each step.
+
+### Example A — Read-only user with role, complex password (sakila)
+
+Create a `dev_read` role with SELECT on `sakila`, then create `dev_reader1` assigned to that role.
+The password meets the 30-character policy and contains a special character (`^`).
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t \
+  --create-user dev_reader1 \
+  --create-pass Xk9mP2nL8qR5vT3wY7uI0oE6sA1cB4dF^ \
+  -r dev_read -g select -db sakila
+```
+
+```Go
+2026/04/27 12:47:15 [+] Connecting to MySQL server at 127.0.0.1:3306 (using command line arguments)
+2026/04/27 12:47:15 [!] Pre-validating NEW USER password against policy (min length: 30)...
+2026/04/27 12:47:15 [+] New user password pre-validation successful
+2026/04/27 12:47:15 [+] Created role: dev_read
+2026/04/27 12:47:15 [+] Granted privileges to role: dev_read
+2026/04/27 12:47:15 [!] MySQL server version: 8.0.43 (parsed as: 80)
+2026/04/27 12:47:15 [!] Using caching_sha2_password for MySQL 8.0+
+2026/04/27 12:47:15 [+] Created user: dev_reader1@% with strong password
+2026/04/27 12:47:15 [+] Granted role to user: dev_reader1
+2026/04/27 12:47:15 [+] Granted privileges to user: dev_reader1
+2026/04/27 12:47:15 [+] Set default role for user: dev_read
+```
+
+Verify role grants:
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t -r dev_read -show
+```
+
+```Go
+2026/04/27 12:56:47 [+] Grants for role dev_read:
+    GRANT USAGE ON *.* TO `dev_read`@`%`
+    GRANT SELECT ON `sakila`.* TO `dev_read`@`%`
+```
+
+Verify user grants:
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t -show-user dev_reader1
+```
+
+```Go
+2026/04/27 12:56:29 [+] Grants for user dev_reader1:
+    GRANT USAGE ON *.* TO `dev_reader1`@`%`
+    GRANT SELECT ON `sakila`.* TO `dev_reader1`@`%`
+    GRANT `dev_read`@`%` TO `dev_reader1`@`%`
+```
+
+---
+
+### Example B — Write user with role, full DML on chaos
+
+Create `app_write_role` with SELECT/INSERT/UPDATE/DELETE on `chaos`, then create `app_writer1`.
+
+```Go
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t \
+  --create-user app_writer1 \
+  --create-pass Mz7nK3pQ9xW2vL5tY8rU1bC4sA6dE0fG^ \
+  -r app_write_role -g select,insert,update,delete -db chaos
+```
+
+```Go
+2026/04/27 12:47:27 [+] Connecting to MySQL server at 127.0.0.1:3306 (using command line arguments)
+2026/04/27 12:47:27 [+] Created role: app_write_role
+2026/04/27 12:47:27 [+] Granted privileges to role: app_write_role
+2026/04/27 12:47:27 [+] Created user: app_writer1@% with strong password
+2026/04/27 12:47:27 [+] Granted role to user: app_writer1
+2026/04/27 12:47:27 [+] Granted privileges to user: app_writer1
+2026/04/27 12:47:27 [+] Set default role for user: app_write_role
+```
+
+Verify role:
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t -r app_write_role -show
+```
+
+```Go
+2026/04/27 12:56:47 [+] Grants for role app_write_role:
+    GRANT USAGE ON *.* TO `app_write_role`@`%`
+    GRANT SELECT, INSERT, UPDATE, DELETE ON `chaos`.* TO `app_write_role`@`%`
+```
+
+Verify user:
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t -show-user app_writer1
+```
+
+```Go
+2026/04/27 12:56:29 [+] Grants for user app_writer1:
+    GRANT USAGE ON *.* TO `app_writer1`@`%`
+    GRANT SELECT, INSERT, UPDATE, DELETE ON `chaos`.* TO `app_writer1`@`%`
+    GRANT `app_write_role`@`%` TO `app_writer1`@`%`
+```
+
+---
+
+### Example C — Direct grants only, no role, short password with -skip-password-policy
+
+`etl_user` needs DML on `roll_back` with a short internal password. No role is attached.
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t \
+  --create-user etl_user \
+  --create-pass Letmein1! \
+  -skip-password-policy \
+  -g select,insert,update,delete -db roll_back
+```
+
+```Go
+2026/04/27 12:48:08 [+] Connecting to MySQL server at 127.0.0.1:3306 (using command line arguments)
+2026/04/27 12:48:08 [!] Password policy enforcement disabled
+2026/04/27 12:48:08 [!] MySQL server version: 8.0.43 (parsed as: 80)
+2026/04/27 12:48:08 [+] Created user: etl_user@% with strong password
+2026/04/27 12:48:08 [+] Granted privileges to user: etl_user
+```
+
+Verify — no role grant present, only direct privileges:
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t -show-user etl_user
+```
+
+```Go
+2026/04/27 12:56:29 [+] Grants for user etl_user:
+    GRANT USAGE ON *.* TO `etl_user`@`%`
+    GRANT SELECT, INSERT, UPDATE, DELETE ON `roll_back`.* TO `etl_user`@`%`
+```
+
+---
+
+### Example D — Complex password with quotes via -use-sql-file
+
+`ca_svc` requires a password containing single quotes and double quotes.
+The `-use-sql-file` flag executes statements directly through the Go MySQL driver,
+bypassing all shell escaping issues.
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t \
+  --create-user ca_svc \
+  --create-pass "C@mp1ex'P@ss\"w0rd!9Tz3Qv8Nm2Lk" \
+  -use-sql-file \
+  -r ca_rw -g select,insert,update -db analysis
+```
+
+```Go
+2026/04/27 12:54:35 [+] Connecting to MySQL server at 127.0.0.1:3306 (using command line arguments)
+2026/04/27 12:54:35 [!] Pre-validating NEW USER password with relaxed policy (SQL file mode)...
+2026/04/27 12:54:35 [+] New user password pre-validation successful
+2026/04/27 12:54:35 [!] Using SQL file execution method for complex password handling
+2026/04/27 12:54:35 [+] Created role: ca_rw
+2026/04/27 12:54:35 [+] Executing 5 statements via Go MySQL driver:
+2026/04/27 12:54:35     CREATE ROLE IF NOT EXISTS `ca_rw`
+2026/04/27 12:54:35     GRANT select,insert,update ON `analysis`.* TO `ca_rw`
+2026/04/27 12:54:35     CREATE USER IF NOT EXISTS 'ca_svc'@'%' IDENTIFIED BY '****MASKED****'
+2026/04/27 12:54:35     GRANT `ca_rw` TO 'ca_svc'@'%'
+2026/04/27 12:54:35     SET DEFAULT ROLE `ca_rw` TO 'ca_svc'@'%'
+2026/04/27 12:54:35 [+] User 'ca_svc' created successfully
+2026/04/27 12:54:35 [+] User creation via SQL file completed successfully
+```
+
+Verify role:
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t -r ca_rw -show
+```
+
+```Go
+2026/04/27 12:56:47 [+] Grants for role ca_rw:
+    GRANT USAGE ON *.* TO `ca_rw`@`%`
+    GRANT SELECT, INSERT, UPDATE ON `analysis`.* TO `ca_rw`@`%`
+```
+
+Verify user:
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t -show-user ca_svc
+```
+
+```Go
+2026/04/27 12:56:29 [+] Grants for user ca_svc:
+    GRANT USAGE ON *.* TO `ca_svc`@`%`
+    GRANT `ca_rw`@`%` TO `ca_svc`@`%`
+```
+
+---
+
+### Example E — Standalone role with no user attached
+
+Create a `reporting_ro` role for future assignment without creating any user account.
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t \
+  -r reporting_ro -g select -db sakila
+```
+
+```Go
+2026/04/27 12:54:44 [+] Connecting to MySQL server at 127.0.0.1:3306 (using command line arguments)
+2026/04/27 12:54:44 [+] Created role: reporting_ro
+2026/04/27 12:54:44 [+] Granted privileges to role: reporting_ro
+```
+
+Verify the role exists with correct privileges:
+
+```bash
+go-create -s 127.0.0.1:3306 -u root -p s3cr3t -r reporting_ro -show
+```
+
+```Go
+2026/04/27 12:56:47 [+] Grants for role reporting_ro:
+    GRANT USAGE ON *.* TO `reporting_ro`@`%`
+    GRANT SELECT ON `sakila`.* TO `reporting_ro`@`%`
+```

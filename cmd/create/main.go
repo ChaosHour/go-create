@@ -361,13 +361,10 @@ func main() {
 	if *useSQLFile && *createUser != "" && *createPassword != "" {
 		log.Printf("%s Using SQL file execution method for complex password handling", yellow("[!]"))
 
-		// Extract host without port and parameters for SQL file executor
+		// Extract host for SQL executor — strip DSN query params but keep port.
 		hostForSQLFile := dbManager.Host
 		if strings.Contains(hostForSQLFile, "?") {
 			hostForSQLFile = strings.Split(hostForSQLFile, "?")[0]
-		}
-		if strings.Contains(hostForSQLFile, ":") {
-			hostForSQLFile = strings.Split(hostForSQLFile, ":")[0]
 		}
 
 		// Create SQL file executor with proper credentials
