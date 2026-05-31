@@ -30,7 +30,6 @@ func NewSQLFileExecutor(host, user, password string, logger *log.Logger) *SQLFil
 
 // ExecuteUserCreation creates a SQL file with the user creation commands and executes it
 func (e *SQLFileExecutor) ExecuteUserCreation(username, password, authPlugin string, roles []string, dbName, grants string) error {
-	yellow := color.New(color.FgYellow).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 
 	// Build SQL statements in memory — no temp files or CLI binary needed.
@@ -71,15 +70,10 @@ func (e *SQLFileExecutor) ExecuteUserCreation(username, password, authPlugin str
 	// 5. Grant privileges directly to user when no roles are specified
 	if dbName != "" && grants != "" && len(roles) == 0 {
 		if dbName == "*.*" {
-			e.Logger.Printf("%s Adding direct grants: GRANT %s ON *.* TO '%s'@'%%'", yellow("[!]"), grants, username)
 			sqlCommands = append(sqlCommands, fmt.Sprintf("GRANT %s ON *.* TO '%s'@'%%'", grants, username))
 		} else {
-			e.Logger.Printf("%s Adding direct grants: GRANT %s ON `%s`.* TO '%s'@'%%'", yellow("[!]"), grants, dbName, username)
 			sqlCommands = append(sqlCommands, fmt.Sprintf("GRANT %s ON `%s`.* TO '%s'@'%%'", grants, dbName, username))
 		}
-	} else {
-		e.Logger.Printf("%s Not adding direct grants: dbName='%s', grants='%s', roleCount=%d",
-			yellow("[!]"), dbName, grants, len(roles))
 	}
 
 	// 6. Set default roles

@@ -17,6 +17,14 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+// version and buildTime are injected at build time via ldflags:
+//
+//	-ldflags "-X main.version=$(git describe) -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+var (
+	version   = "dev"
+	buildTime = "unknown"
+)
+
 // Define flags
 var (
 	source             = flag.String("s", "", "Source Host to connect to")
@@ -54,6 +62,7 @@ func init() {
 
 	// Add clearer usage information about password policy
 	if *help {
+		fmt.Printf("\ngo-create version %s (built %s)\n", version, buildTime)
 		fmt.Println("\nPASSWORD POLICY NOTE:")
 		fmt.Println("  * The password policy (min 30 chars, mixed case, numbers, symbols)")
 		fmt.Println("    ONLY applies when creating NEW USERS with -create-user and -create-pass")
@@ -67,8 +76,8 @@ func init() {
 	// Read .my.cnf first so we have credentials available for validation
 	mycnfHost, mycnfUser, mycnfPwd := auth.ReadMyCnf()
 
-	// Skip .my.cnf message if command line source is provided
-	if *source == "" && mycnfUser != "" {
+	// Only log .my.cnf usage when no explicit config file overrides it
+	if *source == "" && *configFile == "" && mycnfUser != "" {
 		log.Printf("%s Using credentials from .my.cnf", green("[+]"))
 	}
 
@@ -175,15 +184,18 @@ func connectToDatabase() *database.Manager {
 			pwd = mycnfPwd
 		}
 
-		// Config file third
+		// Config file third.
+		// When -config is explicitly supplied it takes full precedence over .my.cnf;
+		// when using the auto-detected default it only fills gaps.
 		if cfg != nil {
-			if cfg.MySQL.User != "" && user == "" {
+			explicitConfig := *configFile != ""
+			if cfg.MySQL.User != "" && (user == "" || explicitConfig) {
 				user = cfg.MySQL.User
 			}
-			if cfg.MySQL.Password != "" && pwd == "" {
+			if cfg.MySQL.Password != "" && (pwd == "" || explicitConfig) {
 				pwd = cfg.MySQL.Password
 			}
-			if cfg.MySQL.Host != "" && host == "" {
+			if cfg.MySQL.Host != "" && (host == "" || explicitConfig) {
 				host = cfg.MySQL.Host
 
 				// Check if host from config already contains parameters
@@ -335,22 +347,18 @@ func main() {
 				yellow("[!]"), policy.MinLength)
 		}
 
-		// Check for problematic special characters
-		if containsProblematicChars(*createPassword) {
-			log.Printf("%s Warning: Password contains special characters that may need escaping when used with MySQL CLI",
-				yellow("[!]"))
-		}
-
 		if *debugPassword {
 			log.Printf("%s Debugging password characters:", yellow("[!]"))
-			// Use the dedicated debug validation function instead
-			if err := auth.ValidatePasswordWithDebug(*createPassword, policy); err != nil {
+			if warn, err := auth.ValidatePasswordWithDebug(*createPassword, policy); err != nil {
 				log.Fatalf("%s Password policy violation for new user creation: %v", red("✘"), err)
+			} else if warn != "" {
+				log.Printf("%s %s", yellow("[!]"), warn)
 			}
 		} else {
-			// Use the standard validation function for non-debug case
-			if err := auth.ValidatePassword(*createPassword, policy); err != nil {
+			if warn, err := auth.ValidatePassword(*createPassword, policy); err != nil {
 				log.Fatalf("%s Password policy violation for new user creation: %v", red("✘"), err)
+			} else if warn != "" {
+				log.Printf("%s %s", yellow("[!]"), warn)
 			}
 		}
 
@@ -386,10 +394,6 @@ func main() {
 				}
 			}
 		}
-
-		// Add debug logging for parameters being passed to ExecuteUserCreation
-		log.Printf("%s Debug: Passing to SQL executor - dbName='%s', grants='%s', roles=%v",
-			yellow("[!]"), *dbName, *grants, rolesToGrant)
 
 		// Execute user creation via SQL file
 		err := executor.ExecuteUserCreation(
@@ -575,15 +579,4 @@ func main() {
 		}
 		log.Fatalf("Failed to commit transaction: %v", err)
 	}
-}
-
-// Helper function to detect potentially problematic password characters
-func containsProblematicChars(password string) bool {
-	problematic := []string{"`", "$", "\\", "|", "&", ";", "<", ">", "(", ")", "*"}
-	for _, char := range problematic {
-		if strings.Contains(password, char) {
-			return true
-		}
-	}
-	return false
 }

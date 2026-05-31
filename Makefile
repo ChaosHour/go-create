@@ -5,9 +5,10 @@ VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}"
 
-# Environment settings for Mac Intel
-GOOS=darwin
-GOARCH=amd64
+# Detect host OS and architecture automatically so 'make build' works on
+# Apple Silicon (arm64), Linux, and Intel Macs without manual changes.
+GOOS=$(shell go env GOOS)
+GOARCH=$(shell go env GOARCH)
 
 # Tools and commands
 GO=go
@@ -20,7 +21,7 @@ GOLINT=golangci-lint
 all: clean fmt lint vet test build
 
 build:
-	@echo "Building ${BINARY_NAME} for macOS (Intel)..."
+	@echo "Building ${BINARY_NAME} for $(GOOS)/$(GOARCH)..."
 	@mkdir -p bin
 	GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(LDFLAGS) -o bin/$(BINARY_NAME) $(MAIN_PATH)
 	@echo "Binary created at bin/$(BINARY_NAME)"
@@ -74,10 +75,22 @@ password-tool:
 
 # Cross-compilation targets
 build-linux:
-	@echo "Building ${BINARY_NAME} for Linux..."
+	@echo "Building ${BINARY_NAME} for Linux amd64..."
 	@mkdir -p bin
 	GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/$(BINARY_NAME)-linux-amd64 $(MAIN_PATH)
 	@echo "Binary created at bin/$(BINARY_NAME)-linux-amd64"
+
+build-linux-arm64:
+	@echo "Building ${BINARY_NAME} for Linux arm64..."
+	@mkdir -p bin
+	GOOS=linux GOARCH=arm64 $(GO) build $(LDFLAGS) -o bin/$(BINARY_NAME)-linux-arm64 $(MAIN_PATH)
+	@echo "Binary created at bin/$(BINARY_NAME)-linux-arm64"
+
+build-darwin-arm64:
+	@echo "Building ${BINARY_NAME} for macOS arm64 (Apple Silicon)..."
+	@mkdir -p bin
+	GOOS=darwin GOARCH=arm64 $(GO) build $(LDFLAGS) -o bin/$(BINARY_NAME)-darwin-arm64 $(MAIN_PATH)
+	@echo "Binary created at bin/$(BINARY_NAME)-darwin-arm64"
 
 build-windows:
 	@echo "Building ${BINARY_NAME} for Windows..."
@@ -85,19 +98,23 @@ build-windows:
 	GOOS=windows GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/$(BINARY_NAME).exe $(MAIN_PATH)
 	@echo "Binary created at bin/$(BINARY_NAME).exe"
 
-build-all: build build-linux build-windows
+build-all: build build-linux build-linux-arm64 build-darwin-arm64 build-windows
 
 help:
 	@echo "Available commands:"
-	@echo "  make build       - Build for macOS (Intel)"
-	@echo "  make clean       - Remove build artifacts"
-	@echo "  make test        - Run tests"
-	@echo "  make fmt         - Format code"
-	@echo "  make lint        - Run linter"
-	@echo "  make vet         - Run go vet"
-	@echo "  make install     - Install dependencies"
-	@echo "  make run         - Build and run the application"
-	@echo "  make build-linux - Build for Linux"
+	@echo "  make build              - Build for current host OS/arch (auto-detected)"
+	@echo "  make clean              - Remove build artifacts"
+	@echo "  make test               - Run tests"
+	@echo "  make fmt                - Format code"
+	@echo "  make lint               - Run linter"
+	@echo "  make vet                - Run go vet"
+	@echo "  make install            - Install dependencies"
+	@echo "  make run                - Build and run the application"
+	@echo "  make build-linux        - Build for Linux amd64"
+	@echo "  make build-linux-arm64  - Build for Linux arm64"
+	@echo "  make build-darwin-arm64 - Build for macOS arm64 (Apple Silicon)"
+	@echo "  make build-windows      - Build for Windows amd64"
+	@echo "  make build-all          - Build for all platforms"
 	@echo "  make build-windows - Build for Windows"
 	@echo "  make build-all   - Build for all platforms"
 	@echo "  make all         - Run clean, fmt, lint, vet, test, and build"

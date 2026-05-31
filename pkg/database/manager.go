@@ -15,6 +15,55 @@ import (
 	"github.com/fatih/color"
 )
 
+// allowedPrivileges is the set of MySQL privilege keywords accepted by -g.
+// This allowlist prevents arbitrary SQL injection via the grants flag.
+var allowedPrivileges = map[string]struct{}{
+	"all":                     {},
+	"all privileges":          {},
+	"select":                  {},
+	"insert":                  {},
+	"update":                  {},
+	"delete":                  {},
+	"create":                  {},
+	"drop":                    {},
+	"reload":                  {},
+	"shutdown":                {},
+	"process":                 {},
+	"file":                    {},
+	"references":              {},
+	"index":                   {},
+	"alter":                   {},
+	"show databases":          {},
+	"super":                   {},
+	"create temporary tables": {},
+	"lock tables":             {},
+	"execute":                 {},
+	"replication slave":       {},
+	"replication client":      {},
+	"create view":             {},
+	"show view":               {},
+	"create routine":          {},
+	"alter routine":           {},
+	"create user":             {},
+	"event":                   {},
+	"trigger":                 {},
+	"create tablespace":       {},
+	"usage":                   {},
+}
+
+// validateGrants checks each comma-separated privilege in the grants string
+// against the known MySQL privilege allowlist and returns an error if any
+// unrecognised value is found.
+func validateGrants(grants string) error {
+	for _, g := range strings.Split(grants, ",") {
+		priv := strings.ToLower(strings.TrimSpace(g))
+		if _, ok := allowedPrivileges[priv]; !ok {
+			return fmt.Errorf("unrecognised privilege %q: must be a valid MySQL privilege keyword (e.g. select, insert, update, delete)", g)
+		}
+	}
+	return nil
+}
+
 // Color formatters for consistent output
 var (
 	green  = color.New(color.FgGreen).SprintFunc()
@@ -40,14 +89,10 @@ type Manager struct {
 // It initializes the password policy with default settings requiring strong passwords
 // for new user creation (30+ chars, mixed case, digits, special chars).
 func NewManager(db *sql.DB, host, username, password string) *Manager {
-	// Add debug output to confirm policy is set
-	policy := auth.DefaultPasswordPolicy()
-	log.Printf("Initializing with password policy: min length %d chars", policy.MinLength)
-
 	return &Manager{
 		DB:             db,
 		Logger:         log.New(os.Stdout, "", log.LstdFlags),
-		PasswordPolicy: policy,
+		PasswordPolicy: auth.DefaultPasswordPolicy(),
 		Host:           host,
 		Username:       username,
 		Password:       password,
@@ -69,6 +114,17 @@ func (dm *Manager) CommitTx() error {
 // RollbackTx rolls back the current transaction
 func (dm *Manager) RollbackTx() error {
 	return dm.Tx.Rollback()
+}
+
+// execer returns the active transaction if one is open, otherwise the plain DB.
+// All mutation operations should use this so they participate in the transaction.
+func (dm *Manager) execer() interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+} {
+	if dm.Tx != nil {
+		return dm.Tx
+	}
+	return dm.DB
 }
 
 // GetMySQLVersion returns MySQL version (57 for 5.7, 80 for 8.0+)
@@ -159,13 +215,9 @@ func (dm *Manager) CheckUserExists(username string) (bool, string, error) {
 
 // CreateUser creates a new MySQL user
 func (dm *Manager) CreateUser(username, password string) (string, error) {
-	// Add debug output to verify policy is being applied ONLY for new user creation
-	dm.Logger.Printf("%s Validating new user password against policy (min length: %d)...",
-		yellow("[!]"), dm.PasswordPolicy.MinLength)
-
-	// Validate password against policy - this only applies to new user creation
-	if err := auth.ValidatePassword(password, dm.PasswordPolicy); err != nil {
-		dm.Logger.Printf("%s New user password policy violation: %v", yellow("[!]"), err)
+	// Validate password against policy - this only applies to new user creation.
+	// Discard the shell-warning string; main.go already printed it during pre-validation.
+	if _, err := auth.ValidatePassword(password, dm.PasswordPolicy); err != nil {
 		return "", fmt.Errorf("new user password policy violation: %w", err)
 	}
 
@@ -185,103 +237,67 @@ func (dm *Manager) CreateUser(username, password string) (string, error) {
 		return "", fmt.Errorf("checking MySQL version: %w", err)
 	}
 
-	// Log the actual MySQL version for debugging
-	var versionStr string
-	if err := dm.DB.QueryRow("SELECT @@version").Scan(&versionStr); err != nil {
-		dm.Logger.Printf("%s Could not query MySQL version: %v", yellow("[!]"), err)
-	} else {
-		dm.Logger.Printf("%s MySQL server version: %s (parsed as: %d)", yellow("[!]"), versionStr, version)
-	}
-
 	var authPlugin string
 
 	// Use forced plugin if specified, otherwise select based on version
 	if dm.AuthPlugin != "" {
 		authPlugin = dm.AuthPlugin
-		dm.Logger.Printf("%s Using forced authentication plugin: %s", yellow("[!]"), authPlugin)
 	} else if version < 80 {
 		authPlugin = "mysql_native_password"
-		dm.Logger.Printf("%s Using mysql_native_password for MySQL 5.7", yellow("[!]"))
 	} else {
 		authPlugin = "caching_sha2_password"
-		dm.Logger.Printf("%s Using caching_sha2_password for MySQL 8.0+", yellow("[!]"))
 	}
 
-	// First try using prepared statement approach
+	// tryCreate attempts to create the user and returns nil on success.
+	tryCreate := func(query string) error {
+		_, e := dm.execer().Exec(query)
+		return e
+	}
+
+	escPassword := strings.Replace(password, "'", "''", -1)
+
+	var createErr error
 	if dm.AuthPlugin == "" {
-		// For default authentication without specifying plugin
-		createQuery := fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED BY '%s'",
-			username, strings.Replace(password, "'", "''", -1))
-		_, err = dm.DB.Exec(createQuery)
-		if err == nil {
-			goto userCreated
-		}
-
-		dm.Logger.Printf("%s First user creation attempt failed, trying with explicit auth plugin", yellow("[!]"))
+		// Attempt 1: default auth (no explicit plugin)
+		createErr = tryCreate(fmt.Sprintf(
+			"CREATE USER '%s'@'%%' IDENTIFIED BY '%s'", username, escPassword))
 	}
 
-	// Try with explicit auth plugin
-	if dm.AuthPlugin != "" || err != nil {
-		escPassword := strings.Replace(password, "'", "''", -1) // Basic SQL string escaping
-		createQuery := fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED WITH %s BY '%s'",
-			username, authPlugin, escPassword)
-
-		dm.Logger.Printf("%s Using direct SQL with escaping: %s", yellow("[!]"),
-			fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED WITH %s BY [PASSWORD]", username, authPlugin))
-
-		_, err = dm.DB.Exec(createQuery)
-		if err == nil {
-			goto userCreated
-		}
+	if dm.AuthPlugin != "" || createErr != nil {
+		// Attempt 2: explicit auth plugin
+		createErr = tryCreate(fmt.Sprintf(
+			"CREATE USER '%s'@'%%' IDENTIFIED WITH %s BY '%s'", username, authPlugin, escPassword))
 	}
 
-	// Final fallback - don't use parameterized queries, they don't work for CREATE USER
-	if err != nil {
-		dm.Logger.Printf("%s Previous methods failed, trying final direct SQL approach", yellow("[!]"))
-
-		// Directly escape password and use it in SQL
-		escPassword := strings.Replace(password, "'", "''", -1)
-		createQuery := fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED BY '%s'",
-			username, escPassword)
-
-		_, err = dm.DB.Exec(createQuery)
-
-		if err != nil {
-			dm.Logger.Printf("%s All user creation methods failed. Try using -use-sql-file flag for complex passwords", red("✘"))
-			return "", fmt.Errorf("creating user: %w", err)
-		}
+	if createErr != nil {
+		// Attempt 3: final fallback — plain IDENTIFIED BY
+		createErr = tryCreate(fmt.Sprintf(
+			"CREATE USER '%s'@'%%' IDENTIFIED BY '%s'", username, escPassword))
 	}
 
-userCreated:
-	// Verify which plugin was actually used
+	if createErr != nil {
+		dm.Logger.Printf("%s All user creation methods failed. Try using -use-sql-file flag for complex passwords", red("✘"))
+		return "", fmt.Errorf("creating user: %w", createErr)
+	}
+
+	// Verify which plugin was actually used and correct if necessary
 	var usedPlugin string
-	err = dm.DB.QueryRow("SELECT plugin FROM mysql.user WHERE User = ? AND Host = '%'", username).Scan(&usedPlugin)
-	if err != nil {
+	if err = dm.DB.QueryRow("SELECT plugin FROM mysql.user WHERE User = ? AND Host = '%'", username).Scan(&usedPlugin); err != nil {
 		dm.Logger.Printf("%s Could not verify authentication plugin: %v", yellow("[!]"), err)
-	} else {
-		dm.Logger.Printf("%s User created with authentication plugin: %s", green("[+]"), usedPlugin)
-
-		// If the wrong plugin was used, try to alter the user
-		if usedPlugin != authPlugin {
-			dm.Logger.Printf("%s Incorrect plugin used (%s vs %s), attempting to correct...",
-				yellow("[!]"), usedPlugin, authPlugin)
-
-			alterQuery := fmt.Sprintf(
-				"ALTER USER '%s'@'%%' IDENTIFIED WITH %s BY '%s'",
-				username, authPlugin, password)
-
-			_, err = dm.DB.Exec(alterQuery)
-			if err != nil {
-				dm.Logger.Printf("%s Failed to update authentication plugin: %v", yellow("[!]"), err)
-			} else {
-				dm.Logger.Printf("%s Successfully updated authentication plugin to %s", green("[+]"), authPlugin)
-			}
+	} else if usedPlugin != authPlugin {
+		dm.Logger.Printf("%s Incorrect plugin used (%s vs %s), attempting to correct...",
+			yellow("[!]"), usedPlugin, authPlugin)
+		alterQuery := fmt.Sprintf(
+			"ALTER USER '%s'@'%%' IDENTIFIED WITH %s BY '%s'",
+			username, authPlugin, escPassword)
+		if _, err = dm.execer().Exec(alterQuery); err != nil {
+			dm.Logger.Printf("%s Failed to update authentication plugin: %v", yellow("[!]"), err)
+		} else {
+			dm.Logger.Printf("%s Successfully updated authentication plugin to %s", green("[+]"), authPlugin)
 		}
 	}
 
-	dm.Logger.Printf("%s Created user: %s@%% with strong password", green("[+]"), username)
-	dm.Logger.Printf("%s NOTE: Complex passwords with special characters may need to be escaped when used in the MySQL CLI", yellow("[!]"))
-	dm.Logger.Printf("%s For complex passwords, consider using the -use-sql-file flag", yellow("[!]"))
+	dm.Logger.Printf("%s Created user: %s@%%", green("[+]"), username)
 	return "%", nil
 }
 
@@ -308,7 +324,7 @@ func (dm *Manager) CreateRole(role string) error {
 	}
 
 	// Create role directly since MySQL doesn't support prepared statements for CREATE ROLE
-	_, err = dm.DB.Exec(fmt.Sprintf("CREATE ROLE `%s`", role))
+	_, err = dm.execer().Exec(fmt.Sprintf("CREATE ROLE `%s`", role))
 	if err != nil {
 		return fmt.Errorf("creating role: %w", err)
 	}
@@ -319,13 +335,16 @@ func (dm *Manager) CreateRole(role string) error {
 
 // GrantPrivileges grants privileges to a role
 func (dm *Manager) GrantPrivileges(role, dbName, grants string) error {
+	if err := validateGrants(grants); err != nil {
+		return err
+	}
 	var query string
 	if dbName == "*.*" {
 		query = fmt.Sprintf("GRANT %s ON *.* TO `%s`", grants, role)
 	} else {
 		query = fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, role)
 	}
-	_, err := dm.DB.Exec(query)
+	_, err := dm.execer().Exec(query)
 	if err != nil {
 		return fmt.Errorf("granting privileges: %w", err)
 	}
@@ -374,7 +393,7 @@ func (dm *Manager) GrantRoles(username, role string, isGCP bool) error {
 	}
 
 	// grant privileges to the role
-	_, err = dm.DB.Exec(fmt.Sprintf("GRANT `%s` TO `%s`", role, username))
+	_, err = dm.execer().Exec(fmt.Sprintf("GRANT `%s` TO `%s`", role, username))
 	if err != nil {
 		return fmt.Errorf("granting role: %w", err)
 	}
@@ -383,7 +402,7 @@ func (dm *Manager) GrantRoles(username, role string, isGCP bool) error {
 	// If isGCP flag is set, revoke cloudsqlsuperuser role
 	if isGCP {
 		revokeQuery := fmt.Sprintf("REVOKE IF EXISTS 'cloudsqlsuperuser' FROM '%s'@'%s'", username, userHost)
-		_, err = dm.DB.Exec(revokeQuery)
+		_, err = dm.execer().Exec(revokeQuery)
 		if err != nil {
 			dm.Logger.Printf("%s Warning: Failed to revoke cloudsqlsuperuser from %s@%s: %v", yellow("[!]"), username, userHost, err)
 		} else {
@@ -395,6 +414,9 @@ func (dm *Manager) GrantRoles(username, role string, isGCP bool) error {
 
 // GrantPrivilegesToUser grants privileges to a user
 func (dm *Manager) GrantPrivilegesToUser(username, dbName, grants string) error {
+	if err := validateGrants(grants); err != nil {
+		return err
+	}
 	var query string
 	if dbName == "*.*" {
 		// Get existing global privileges
@@ -427,7 +449,7 @@ func (dm *Manager) GrantPrivilegesToUser(username, dbName, grants string) error 
 		query = fmt.Sprintf("GRANT %s ON `%s`.* TO `%s`", grants, dbName, username)
 	}
 
-	_, err := dm.DB.Exec(query)
+	_, err := dm.execer().Exec(query)
 	if err != nil {
 		return fmt.Errorf("granting privileges: %w", err)
 	}
@@ -447,7 +469,7 @@ func (dm *Manager) SetDefaultRole(username, role string) error {
 		return nil
 	}
 
-	_, err = dm.DB.Exec(fmt.Sprintf("ALTER USER `%s` DEFAULT ROLE `%s`", username, role))
+	_, err = dm.execer().Exec(fmt.Sprintf("ALTER USER `%s` DEFAULT ROLE `%s`", username, role))
 	if err != nil {
 		return fmt.Errorf("setting default role: %w", err)
 	}
