@@ -38,10 +38,12 @@ func DefaultPasswordPolicy() PasswordPolicy {
 }
 
 // ValidatePassword checks if a password meets the specified policy
-// This is only used for new user creation, not for authentication
-func ValidatePassword(password string, policy PasswordPolicy) error {
+// This is only used for new user creation, not for authentication.
+// It returns an error for policy violations and a non-empty warning string
+// when the password contains shell-problematic characters (not a failure).
+func ValidatePassword(password string, policy PasswordPolicy) (string, error) {
 	if len(password) < policy.MinLength {
-		return fmt.Errorf("password must be at least %d characters long (got %d)",
+		return "", fmt.Errorf("password must be at least %d characters long (got %d)",
 			policy.MinLength, len(password))
 	}
 
@@ -66,16 +68,16 @@ func ValidatePassword(password string, policy PasswordPolicy) error {
 	}
 
 	if policy.RequireUppercase && !hasUpper {
-		return fmt.Errorf("password must contain at least one uppercase letter")
+		return "", fmt.Errorf("password must contain at least one uppercase letter")
 	}
 	if policy.RequireLowercase && !hasLower {
-		return fmt.Errorf("password must contain at least one lowercase letter")
+		return "", fmt.Errorf("password must contain at least one lowercase letter")
 	}
 	if policy.RequireDigits && !hasDigit {
-		return fmt.Errorf("password must contain at least one digit")
+		return "", fmt.Errorf("password must contain at least one digit")
 	}
 	if policy.RequireSpecialChars && !hasSpecial {
-		return fmt.Errorf("password must contain at least one special character")
+		return "", fmt.Errorf("password must contain at least one special character")
 	}
 
 	// Return warnings but don't fail for special characters when SQLFileMode is true
@@ -83,21 +85,21 @@ func ValidatePassword(password string, policy PasswordPolicy) error {
 		// Check for forbidden MySQL password characters - only fail if not using SQL file mode
 		for _, char := range ForbiddenPasswordChars {
 			if strings.Contains(password, char) {
-				return fmt.Errorf("password contains forbidden MySQL character: '%s' - use -use-sql-file flag or see docs/mysql_password_guidelines.md", char)
+				return "", fmt.Errorf("password contains forbidden MySQL character: '%s' - use -use-sql-file flag or see docs/mysql_password_guidelines.md", char)
 			}
 		}
 	}
 
-	// Check for shell-problematic characters (warning only)
+	// Check for shell-problematic characters — return as warning, not printed here
 	for _, char := range ShellProblematicChars {
 		if strings.Contains(password, char) {
-			fmt.Printf("WARNING: Password contains shell-problematic character: '%s' which may cause connection issues\n", char)
+			warn := fmt.Sprintf("Password contains shell-problematic character: '%s' which may cause connection issues", char)
 			if !policy.SQLFileMode {
-				fmt.Println("Consider using -use-sql-file flag and see docs/mysql_password_guidelines.md")
+				warn += " — consider using -use-sql-file flag (see docs/mysql_password_guidelines.md)"
 			}
-			break // Only warn once
+			return warn, nil
 		}
 	}
 
-	return nil
+	return "", nil
 }

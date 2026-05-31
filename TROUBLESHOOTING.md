@@ -18,12 +18,15 @@ This guide helps resolve common issues when using go-create.
 **Error:** `Failed to connect: dial tcp: connect: connection refused`
 
 **Solutions:**
+
 1. Verify MySQL server is running:
+
    ```bash
    mysql -h hostname -u root -p -e "SELECT 1"
    ```
 
 2. Check host and port are correct:
+
    ```bash
    go-create -s hostname:3306 -u root -p password -show-user root
    ```
@@ -31,7 +34,8 @@ This guide helps resolve common issues when using go-create.
 3. Verify firewall allows connections on port 3306
 
 4. Check MySQL bind-address in my.cnf:
-   ```
+
+   ```ini
    bind-address = 0.0.0.0  # Allow remote connections
    ```
 
@@ -40,7 +44,9 @@ This guide helps resolve common issues when using go-create.
 **Error:** `Failed to connect: context deadline exceeded`
 
 **Solutions:**
+
 1. Add timeout parameter to connection string:
+
    ```json
    {
      "mysql": {
@@ -52,6 +58,7 @@ This guide helps resolve common issues when using go-create.
    ```
 
 2. Check network connectivity:
+
    ```bash
    ping hostname
    telnet hostname 3306
@@ -62,13 +69,16 @@ This guide helps resolve common issues when using go-create.
 **Error:** `Access denied for user 'root'@'hostname'`
 
 **Solutions:**
+
 1. Verify credentials are correct
 2. Check user exists and has proper host:
+
    ```sql
    SELECT user, host FROM mysql.user WHERE user='root';
    ```
 
 3. Ensure admin user has sufficient privileges:
+
    ```sql
    GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
    FLUSH PRIVILEGES;
@@ -81,6 +91,7 @@ This guide helps resolve common issues when using go-create.
 **Error:** `password must be at least 30 characters long`
 
 **Solutions:**
+
 1. Use a longer password meeting requirements:
    - Minimum 30 characters
    - At least one uppercase letter
@@ -89,11 +100,13 @@ This guide helps resolve common issues when using go-create.
    - At least one special character
 
 2. Skip policy for testing (not recommended for production):
+
    ```bash
    go-create --create-user test --create-pass "short" -skip-password-policy
    ```
 
 3. Example of valid password:
+
    ```bash
    go-create --create-user myuser \
      --create-pass "MySecureP@ssw0rd2024WithManyChars!" \
@@ -105,7 +118,9 @@ This guide helps resolve common issues when using go-create.
 **Error:** `password contains forbidden MySQL character: '@'`
 
 **Solutions:**
+
 1. Use the SQL file mode for complex passwords:
+
    ```bash
    go-create --create-user myuser \
      --create-pass "Complex'P@ss\"w0rd!" \
@@ -117,6 +132,7 @@ This guide helps resolve common issues when using go-create.
    - Safe special chars: `!` `%` `^` `&` `*` `-` `_` `+` `=`
 
 3. Example safe password:
+
    ```bash
    go-create --create-user myuser \
      --create-pass "MySecure!P%ssw0rd2024^WithChars*" \
@@ -128,17 +144,21 @@ This guide helps resolve common issues when using go-create.
 **Warning:** `Password contains shell-problematic character`
 
 **Solutions:**
+
 1. Use SQL file mode (recommended):
+
    ```bash
    go-create --create-user myuser --create-pass 'Pass$123' -use-sql-file
    ```
 
 2. Use single quotes to prevent shell expansion:
+
    ```bash
    go-create --create-user myuser --create-pass 'Pass$123'
    ```
 
 3. Use a config file instead:
+
    ```json
    {
      "mysql": {
@@ -156,13 +176,16 @@ This guide helps resolve common issues when using go-create.
 **Error:** `Access denied; you need (at least one of) the CREATE USER privilege(s)`
 
 **Solutions:**
+
 1. Ensure admin user has CREATE USER privilege:
+
    ```sql
    GRANT CREATE USER ON *.* TO 'admin'@'%';
    FLUSH PRIVILEGES;
    ```
 
 2. Check current privileges:
+
    ```bash
    go-create -show-user admin
    ```
@@ -174,13 +197,16 @@ This guide helps resolve common issues when using go-create.
 **Error:** `Access denied for user 'admin'@'%' with GRANT OPTION`
 
 **Solutions:**
+
 1. Admin user needs GRANT OPTION:
+
    ```sql
    GRANT ALL PRIVILEGES ON *.* TO 'admin'@'%' WITH GRANT OPTION;
    FLUSH PRIVILEGES;
    ```
 
 2. Verify GRANT OPTION is present:
+
    ```sql
    SHOW GRANTS FOR 'admin'@'%';
    ```
@@ -195,9 +221,11 @@ This guide helps resolve common issues when using go-create.
 MySQL 5.7 does not support roles. Roles were introduced in MySQL 8.0.
 
 **Solutions:**
+
 1. Upgrade to MySQL 8.0+ to use roles
 
 2. For MySQL 5.7, use direct grants instead:
+
    ```bash
    # MySQL 5.7 - grant directly to user
    go-create --create-user myuser --create-pass "password..." \
@@ -205,6 +233,7 @@ MySQL 5.7 does not support roles. Roles were introduced in MySQL 8.0.
    ```
 
 3. For MySQL 8.0+, use roles:
+
    ```bash
    # MySQL 8.0+ - use roles
    go-create --create-user myuser --create-pass "password..." \
@@ -219,17 +248,21 @@ MySQL 5.7 does not support roles. Roles were introduced in MySQL 8.0.
 The role you're trying to create already exists. This is not an error.
 
 **Solutions:**
+
 1. Show existing role grants:
+
    ```bash
    go-create -r app_read -show
    ```
 
 2. Grant existing role to user:
+
    ```bash
    go-create --create-user newuser --create-pass "password..." -r app_read
    ```
 
 3. Drop and recreate if needed:
+
    ```sql
    DROP ROLE IF EXISTS 'app_read';
    ```
@@ -239,6 +272,7 @@ The role you're trying to create already exists. This is not an error.
 **Info:** Tool will not duplicate role grants if user already has the role.
 
 **To verify:**
+
 ```bash
 go-create -show-user username
 ```
@@ -250,7 +284,9 @@ go-create -show-user username
 **Error:** User still has cloudsqlsuperuser role after creation
 
 **Solutions:**
+
 1. Ensure you're using the -gcp flag:
+
    ```bash
    go-create -s cloud-sql-host -u root -p password \
      --create-user myuser --create-pass "password..." \
@@ -258,6 +294,7 @@ go-create -show-user username
    ```
 
 2. Manually revoke if needed:
+
    ```sql
    REVOKE cloudsqlsuperuser FROM 'myuser'@'%';
    ```
@@ -267,16 +304,19 @@ go-create -show-user username
 **Error:** Cannot connect to Cloud SQL instance
 
 **Solutions:**
+
 1. Ensure Cloud SQL instance is running
 
 2. Check authorized networks in Cloud SQL settings
 
 3. Use Cloud SQL Proxy:
+
    ```bash
    cloud_sql_proxy -instances=PROJECT:REGION:INSTANCE=tcp:3306
    ```
 
 4. Then connect via localhost:
+
    ```bash
    go-create -s localhost:3306 -u root -p password ...
    ```
@@ -288,18 +328,22 @@ go-create -show-user username
 **Warning:** `Could not load config file`
 
 **Solutions:**
+
 1. Specify config file explicitly:
+
    ```bash
    go-create -config /path/to/config.json ...
    ```
 
 2. Place config in default location:
+
    ```bash
    mkdir -p ~/.config
    cp config.json ~/.go-create.json
    ```
 
 3. Use command-line flags instead:
+
    ```bash
    go-create -s hostname -u user -p password ...
    ```
@@ -309,18 +353,22 @@ go-create -show-user username
 **Error:** `Failed to create temp directory`
 
 **Solutions:**
+
 1. Check /tmp directory exists and is writable:
+
    ```bash
    ls -ld /tmp
    chmod 1777 /tmp
    ```
 
 2. Check disk space:
+
    ```bash
    df -h /tmp
    ```
 
 3. Set TMPDIR environment variable:
+
    ```bash
    export TMPDIR=/path/to/writable/dir
    go-create ...
@@ -331,16 +379,19 @@ go-create -show-user username
 **Error:** `Failed to commit transaction`
 
 **Solutions:**
+
 1. Check for conflicting operations
 
 2. Retry the operation
 
 3. Verify database server is not in read-only mode:
+
    ```sql
    SHOW VARIABLES LIKE 'read_only';
    ```
 
 4. Check MySQL error log for details:
+
    ```bash
    tail -f /var/log/mysql/error.log
    ```
@@ -350,6 +401,7 @@ go-create -show-user username
 ### Enable Verbose Logging
 
 Set environment variable:
+
 ```bash
 export GO_CREATE_DEBUG=1
 go-create ...
@@ -364,6 +416,7 @@ mysql -h hostname -u root -p -e "SELECT VERSION();"
 ### Verify User Creation
 
 After creating a user, verify:
+
 ```bash
 # Show user grants
 go-create -show-user newuser
@@ -375,6 +428,7 @@ mysql -h hostname -u newuser -p
 ### SQL File Mode Debug
 
 When using -use-sql-file, check the generated SQL:
+
 ```bash
 # The tool will log the SQL file location
 # Look for: "Created SQL file for user creation: /tmp/..."
@@ -383,6 +437,7 @@ When using -use-sql-file, check the generated SQL:
 ### Test Connection
 
 Use the built-in connection tester:
+
 ```bash
 go-create -test-connection -user myuser -pass "password" -host hostname
 ```
@@ -391,7 +446,7 @@ go-create -test-connection -user myuser -pass "password" -host hostname
 
 If you can't resolve your issue:
 
-1. Check existing GitHub issues: https://github.com/ChaosHour/go-create/issues
+1. Check existing GitHub issues: <https://github.com/ChaosHour/go-create/issues>
 2. Review the README.md for examples
 3. Check SECURITY.md for security-related issues
 4. Open a new issue with:

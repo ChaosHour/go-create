@@ -65,6 +65,7 @@ make test
 ### Branch Naming
 
 Use descriptive branch names:
+
 - `feature/add-new-feature` - For new features
 - `bugfix/fix-issue-123` - For bug fixes
 - `docs/update-readme` - For documentation updates
@@ -74,7 +75,7 @@ Use descriptive branch names:
 
 Write clear, concise commit messages:
 
-```
+```text
 Short summary (50 chars or less)
 
 More detailed explanation if needed. Wrap at 72 characters.
@@ -90,29 +91,33 @@ Explain what and why, not how.
 This project follows standard Go conventions:
 
 1. **Formatting**: Use `gofmt` and `goimports`
+
    ```bash
    gofmt -w .
    goimports -w .
    ```
 
 2. **Linting**: Code must pass golangci-lint
+
    ```bash
    make lint
    ```
 
 3. **Error Handling**: Always check and handle errors appropriately
+
    ```go
    // Bad
-   data, _ := ioutil.ReadFile("file.txt")
-   
+   data, _ := os.ReadFile("file.txt")
+
    // Good
-   data, err := ioutil.ReadFile("file.txt")
+   data, err := os.ReadFile("file.txt")
    if err != nil {
        return fmt.Errorf("reading file: %w", err)
    }
    ```
 
 4. **Documentation**: Add GoDoc comments for exported functions
+
    ```go
    // CreateUser creates a new MySQL user with the specified password.
    // It validates the password against the configured policy and returns
@@ -143,6 +148,7 @@ go test -cover ./...
 ### Writing Tests
 
 1. **Use table-driven tests** for multiple scenarios:
+
    ```go
    func TestFunction(t *testing.T) {
        tests := []struct {
@@ -191,6 +197,7 @@ git rebase upstream/main
 ### Pull Request Process
 
 1. Push your changes to your fork
+
    ```bash
    git push origin feature/your-feature-name
    ```

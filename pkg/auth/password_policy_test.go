@@ -205,7 +205,7 @@ func TestValidatePassword(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidatePassword(tt.password, tt.policy)
+			_, err := ValidatePassword(tt.password, tt.policy)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidatePassword() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -247,7 +247,7 @@ func TestPasswordPolicyWithShellProblematicChars(t *testing.T) {
 	for _, password := range problematicPasswords {
 		t.Run("Shell problematic: "+password[:20]+"...", func(t *testing.T) {
 			// Should not error out, just warn
-			err := ValidatePassword(password, policy)
+			_, err := ValidatePassword(password, policy)
 			if err != nil {
 				t.Errorf("ValidatePassword() with shell-problematic char should warn but not error, got: %v", err)
 			}
@@ -280,7 +280,7 @@ func TestPasswordPolicyForbiddenChars(t *testing.T) {
 
 	for _, tt := range forbiddenPasswords {
 		t.Run("Forbidden char: "+tt.char, func(t *testing.T) {
-			err := ValidatePassword(tt.password, policy)
+			_, err := ValidatePassword(tt.password, policy)
 			if err == nil {
 				t.Errorf("ValidatePassword() should fail with forbidden char '%s', but didn't", tt.char)
 			}

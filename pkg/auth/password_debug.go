@@ -28,7 +28,7 @@ func DumpPasswordCharacters(password string) string {
 
 // ValidatePasswordWithDebug enhances password validation with character-level debugging
 // This function calls the standard ValidatePassword function but adds detailed diagnostics
-func ValidatePasswordWithDebug(password string, policy PasswordPolicy) error {
+func ValidatePasswordWithDebug(password string, policy PasswordPolicy) (string, error) {
 	// Print the debug info about the password characters
 	fmt.Println(DumpPasswordCharacters(password))
 

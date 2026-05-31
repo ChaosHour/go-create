@@ -87,6 +87,7 @@ When creating new users with `--create-user` and `--create-pass`, passwords must
 ### Forbidden Characters (without -use-sql-file flag)
 
 The following characters can cause issues with MySQL and should be avoided unless using the `-use-sql-file` flag:
+
 - Single quotes: `'`
 - Double quotes: `"`
 - Backslash: `\`
@@ -98,6 +99,7 @@ The following characters can cause issues with MySQL and should be avoided unles
 ### Shell-Problematic Characters
 
 These characters may cause issues with command-line MySQL operations (warnings will be shown):
+
 - Dollar sign: `$`
 - Pipe: `|`
 - Ampersand: `&`
@@ -125,82 +127,103 @@ go-create --create-user myuser --create-pass "Complex'P@ss\"w0rd!" \
 
 ## Usage
 
-```GO
+```bash
 go-create -h
+  -auth-plugin string
+        Force a specific authentication plugin (mysql_native_password or caching_sha2_password)
   -config string
         Path to configuration file
+  -create-pass string
+        Password for the user being created (subject to password policy)
   -create-user string
         Username to create/modify
-  -create-pass string
-        Password for the user being created
   -db string
         Database name
+  -debug-password
+        Print detailed information about password characters (useful for diagnosing policy failures)
   -g string
         Comma-separated list of grants to create
   -gcp
         Revoke cloudsqlsuperuser role after granting roles (for GCP Cloud SQL)
-  -h    
+  -h
         Print help
+  -host string
+        Host for connection test (with -test-connection)
   -p string
         Password for the admin connection
+  -pass string
+        Password for connection test (with -test-connection)
   -r string
         Comma-separated list of roles to create
   -s string
         Source Host (MySQL server address)
   -show
         Show grants for specified role (requires -r flag)
+  -show-role string
+        Show grants for the specified role name
   -show-user string
         Show grants for the specified username
+  -skip-password-policy
+        Skip password policy enforcement when creating new users
+  -test-connection
+        Test connection with provided credentials
   -u string
         Username for the admin connection
+  -use-sql-file
+        Create a temporary SQL file for executing commands (helps with complex passwords)
+  -user string
+        Username for connection test (with -test-connection)
 ```
 
 ## Examples
 
 ### 1. Creating a user with role and privileges
 
-```GO
+```bash
 # Create user 'lisa' with role 'app_write' and specific database privileges
-go-create -s 10.8.0.15 -u lisa -p OxFF29szWNQ962hUa0Toez3 -r app_write -g select,insert,update,delete -db app_db 
+# Password must be 30+ chars with mixed case, digits, and special characters
+go-create -s 10.8.0.15 -u admin -p adminpass \
+  --create-user lisa --create-pass 'MyStr0ngP@ssw0rd2024!ForLisa#' \
+  -r app_write -g select,insert,update,delete -db app_db
 ```
 
 ### 2. Creating a role with privileges
 
-```GO
+```bash
 # Create role 'app_read2' with SELECT privilege on app_db
-go-create -s 10.8.0.15 -r app_read2 -g select -db app_db
+go-create -s 10.8.0.15 -u admin -p adminpass -r app_read2 -g select -db app_db
 ```
 
 ### 3. Showing user grants
 
-```GO
+```bash
 # Show grants for user 'lisa'
 go-create -show-user lisa
 ```
 
-### 4. Creating a user with role in Google Cloud SQL
+### 4. Show role privileges
 
-```GO
-# Create user 'repl' with role 'repl_role', specific database privileges, and revoke cloudsqlsuperuser
-# Note: -u and -p are for admin credentials, --create-user and --create-pass are for the new user
-go-create -s cloud-sql-instance -u root -p s3cr3t --create-user repl --create-pass replpass -g select,insert,update,delete -db app_db -r repl_role -gcp
+```bash
+# Show privileges for a role by name
+go-create -show-role app_read
 
-# The above command will:
-# 1. Connect as root to create the new user
-# 2. Create user 'repl' with password 'replpass'
-# 3. Create role 'repl_role'
-# 4. Grant the specified privileges to the role
-# 5. Grant the role to the user
-# 6. Revoke cloudsqlsuperuser role (due to -gcp flag)
+# Or use -show with -r:
+go-create -r app_read -show
+
+# Output:
+# 2025/02/17 10:33:55 [+] Grants for role app_read:
+# 2025/02/17 10:33:55     GRANT USAGE ON *.* TO `app_read`@`%`
+# 2025/02/17 10:33:55     GRANT SELECT ON `chaos`.* TO `app_read`@`%`
 ```
-
-Note: The -gcp flag specifically handles Google Cloud SQL instances where users are automatically granted the 'cloudsqlsuperuser' role. When this flag is used, the tool will automatically revoke this role after granting the specified roles.
 
 ### 5. Creating a user with role in Google Cloud SQL
 
-```GO
+```bash
 # Create user 'repl' with role 'repl_role', specific database privileges, and revoke cloudsqlsuperuser
-go-create -s cloud-sql-instance -u root -p s3cr3t --create-user repl --create-pass replpass -g select,insert,update,delete -db app_db -r repl_role -gcp
+# Note: -u and -p are for admin credentials, --create-user and --create-pass are for the new user
+go-create -s cloud-sql-instance -u root -p adminpass \
+  --create-user repl --create-pass 'Repl!c@t10nP@ssw0rd2024$ecure' \
+  -g select,insert,update,delete -db app_db -r repl_role -gcp
 
 # Output will include:
 # [+] Created user: repl@%
@@ -210,17 +233,13 @@ go-create -s cloud-sql-instance -u root -p s3cr3t --create-user repl --create-pa
 # [+] Revoked cloudsqlsuperuser role from user: repl@%
 ```
 
-Note: When using with Google Cloud SQL:
-
-- The `-u` and `-p` flags are for the admin credentials (to connect to the database)
-- The `--create-user` and `--create-pass` flags specify the new user to create
-- The `-gcp` flag ensures the cloudsqlsuperuser role is revoked after granting the specified roles
+> **GCP note:** `-u`/`-p` are the admin credentials used to connect. `--create-user`/`--create-pass` define the new user. The `-gcp` flag revokes the automatically-assigned `cloudsqlsuperuser` role after granting the specified roles.
 
 ### 6. Using credentials from .my.cnf
 
-```GO
+```bash
 # Create role 'app_read' with SELECT privilege on chaos database
-# Note: No -u/-p/-s flags needed when using .my.cnf
+# No -u/-p/-s flags needed when credentials are in ~/.my.cnf
 go-create -r app_read -g select -db chaos
 
 # Output will include:
@@ -230,52 +249,40 @@ go-create -r app_read -g select -db chaos
 # [+] Granted privileges to role: app_read
 ```
 
-### 7. Show role privileges
+### 7. Testing a connection
 
-```GO
-# Show privileges for role 'app_read'
-go-create -r app_read -show
-
-# Output:
-2025/02/17 10:33:55 [+] Using credentials from .my.cnf
-2025/02/17 10:33:55 [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
-2025/02/17 10:33:55 [+] Grants for role app_read:
-2025/02/17 10:33:55     GRANT USAGE ON *.* TO `app_read`@`%`
-2025/02/17 10:33:55     GRANT SELECT ON `chaos`.* TO `app_read`@`%`
+```bash
+# Verify a newly created user can connect
+go-create -test-connection -host 10.8.0.15 -user lisa -pass 'MyStr0ngP@ssw0rd2024!ForLisa#'
 ```
 
 ### 8. Creating a user with password, role and privileges
 
-```GO
+```bash
 # Create user 'lisa' with password, role 'app_write', and specific database privileges
-go-create --create-user lisa --create-pass OxFF29szWNQ962hUa0Toez3 -r app_write -g select,insert,update,delete -db chaos
+go-create --create-user lisa --create-pass 'MyStr0ngP@ssw0rd2024!ForLisa#' \
+  -r app_write -g select,insert,update,delete -db chaos
 
 # Output:
-2025/02/17 10:36:46 [+] Using credentials from .my.cnf
-2025/02/17 10:36:46 [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
-2025/02/17 10:36:46 [+] Created role: app_write
-2025/02/17 10:36:46 [+] Granted privileges to role: app_write
-2025/02/17 10:36:46 [+] Created user: lisa@%
-2025/02/17 10:36:46 [+] Granted role to user: lisa
-2025/02/17 10:36:46 [+] Granted privileges to user: lisa
-2025/02/17 10:36:46 [+] Set default role for user: lisa
+# [+] Created role: app_write
+# [+] Granted privileges to role: app_write
+# [+] Created user: lisa@%
+# [+] Granted role to user: lisa
+# [+] Granted privileges to user: lisa
+# [+] Set default role for user: lisa
 
 # Verify role privileges:
 go-create -r app_write -show
-2025/02/17 10:37:23 [+] Using credentials from .my.cnf
-2025/02/17 10:37:23 [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
-2025/02/17 10:37:23 [+] Grants for role app_write:
-2025/02/17 10:37:23     GRANT USAGE ON *.* TO `app_write`@`%`
-2025/02/17 10:37:23     GRANT SELECT, INSERT, UPDATE, DELETE ON `chaos`.* TO `app_write`@`%`
+# [+] Grants for role app_write:
+#     GRANT USAGE ON *.* TO `app_write`@`%`
+#     GRANT SELECT, INSERT, UPDATE, DELETE ON `chaos`.* TO `app_write`@`%`
 
 # Verify user grants:
 go-create -show-user lisa
-2025/02/17 10:38:10 [+] Using credentials from .my.cnf
-2025/02/17 10:38:10 [+] Connecting to MySQL server at 192.168.50.50:3306 (using .my.cnf)
-2025/02/17 10:38:10 [+] Grants for user lisa:
-2025/02/17 10:38:10     GRANT USAGE ON *.* TO `lisa`@`%`
-2025/02/17 10:38:10     GRANT SELECT, INSERT, UPDATE, DELETE ON `chaos`.* TO `lisa`@`%`
-2025/02/17 10:38:10     GRANT `app_write`@`%` TO `lisa`@`%`
+# [+] Grants for user lisa:
+#     GRANT USAGE ON *.* TO `lisa`@`%`
+#     GRANT SELECT, INSERT, UPDATE, DELETE ON `chaos`.* TO `lisa`@`%`
+#     GRANT `app_write`@`%` TO `lisa`@`%`
 ```
 
 ## Testing the Connection After User Creation
@@ -285,6 +292,7 @@ After creating a user, you can test the connection using the MySQL client:
 ```sh
 mysql -h <host> -u <new_user> -p
 ```
+
 Enter the password when prompted.
 
 Or, using the password file created earlier:
@@ -712,4 +720,101 @@ go-create -s 127.0.0.1:3306 -u root -p s3cr3t -r reporting_ro -show
 2026/04/27 12:56:47 [+] Grants for role reporting_ro:
     GRANT USAGE ON *.* TO `reporting_ro`@`%`
     GRANT SELECT ON `sakila`.* TO `reporting_ro`@`%`
+```
+
+---
+
+### Example F — Create a user using a .go-create.json config file
+
+Store admin credentials in `.go-create.json` so you don't pass `-u`/`-p`/`-s` on every command.
+When `-config` is explicitly supplied it takes full precedence over `~/.my.cnf`.
+
+```json
+{
+  "mysql": {
+    "host": "127.0.0.1",
+    "port": "3306",
+    "user": "root",
+    "password": "your_admin_password"
+  }
+}
+```
+
+```bash
+./bin/go-create \
+  -config .go-create.json \
+  -create-user analyst6 \
+  -create-pass 'MyS3cur3-P4ss!w0rd_G0Create_2026'
+```
+
+```text
+2026/05/31 14:40:34 [+] Connecting to MySQL server at 127.0.0.1:3306 (using .go-create.json)
+2026/05/31 14:40:34 [!] Pre-validating NEW USER password against policy (min length: 30)...
+2026/05/31 14:40:34 [!] Password contains shell-problematic character: '!' which may cause connection issues — consider using -use-sql-file flag (see docs/mysql_password_guidelines.md)
+2026/05/31 14:40:34 [+] New user password pre-validation successful
+2026/05/31 14:40:34 [+] Created user: analyst6@%
+```
+
+Verify:
+
+```bash
+mysql --defaults-group-suffix=_primary1 --comments=on -u analyst6 -p
+```
+
+```text
+mysql> show grants;
++--------------------------------------+
+| Grants for analyst6@%               |
++--------------------------------------+
+| GRANT USAGE ON *.* TO `analyst6`@`%` |
++--------------------------------------+
+1 row in set (0.002 sec)
+```
+
+---
+
+### Example G — Create a role only (with config file)
+
+```bash
+./bin/go-create \
+  -config .go-create.json \
+  -r new_analyst_role \
+  -db sakila \
+  -g 'SELECT'
+```
+
+```text
+2026/05/31 14:41:59 [+] Connecting to MySQL server at 127.0.0.1:3306 (using .go-create.json)
+2026/05/31 14:41:59 [+] Created role: new_analyst_role
+2026/05/31 14:41:59 [+] Granted privileges to role: new_analyst_role
+```
+
+---
+
+### Example H — Create a new user and new role together (with config file)
+
+A single command creates the role, grants it privileges, creates the user, grants the role to the
+user, grants direct privileges to the user, and sets the default role — all in one transaction.
+
+```bash
+./bin/go-create \
+  -config .go-create.json \
+  -create-user new_analyst \
+  -create-pass 'MyS3cur3-P4ss!w0rd_G0Create_2026' \
+  -r new_analyst_role \
+  -db sakila \
+  -g 'SELECT'
+```
+
+```text
+2026/05/31 14:42:33 [+] Connecting to MySQL server at 127.0.0.1:3306 (using .go-create.json)
+2026/05/31 14:42:33 [!] Pre-validating NEW USER password against policy (min length: 30)...
+2026/05/31 14:42:33 [!] Password contains shell-problematic character: '!' which may cause connection issues — consider using -use-sql-file flag (see docs/mysql_password_guidelines.md)
+2026/05/31 14:42:33 [+] New user password pre-validation successful
+2026/05/31 14:42:33 [!] Role new_analyst_role already exists
+2026/05/31 14:42:33 [+] Granted privileges to role: new_analyst_role
+2026/05/31 14:42:33 [+] Created user: new_analyst@%
+2026/05/31 14:42:33 [+] Granted role to user: new_analyst
+2026/05/31 14:42:33 [+] Granted privileges to user: new_analyst
+2026/05/31 14:42:33 [+] Set default role for user: new_analyst_role
 ```
